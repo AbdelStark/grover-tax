@@ -1,488 +1,110 @@
-# v0.1 Technical Specification
+# SPEC — `grover-tax` v0.1
 
-**Document:** Single-laptop, single-core, no-GPU benchmark of Stwo vs SP1+Groth16 on the ECDLP-paper point-addition ZKP example.
-**Status:** spec frozen for implementation.
-**Scope:** Tier 1 only.
-**Repository:** `grover-tax`.
+This is the single-page index for the canonical specification of `grover-tax`, the single-laptop, single-core, no-GPU benchmark of Stwo vs SP1+Groth16 on a fixed ECDLP point-addition ZKP.
 
----
+The PRD (`PRD.md`) is the historical statement of intent. The specification *below* is the implementation contract. Where they disagree, the spec wins; where the spec is silent, the PRD is informative.
 
-## 1. Objective
+## Executive summary
 
-Produce a reproducible, publicly verifiable wall-clock comparison of two ZK proving stacks on a single proof statement, on a single CPU core, on a single laptop.
+`grover-tax` produces one number — `t_SP1_Groth16 / t_Stwo` — on a fixed proof statement, on a fixed hardware reference, under fixed environmental controls, with a fixed metric set. Around that one number it produces a full reproducibility envelope: the fixture both provers consume, the toolchain matrix used to build them, the discard rules that excluded noise, the disclosures that name every divergence from apples-to-apples.
 
-Exit conditions (all four required):
+A reproducer with the reference rig can recompute the number from a clean clone in under 30 minutes.
 
-1. Both provers run end-to-end against a shared fixture file on the reference rig.
-2. The full protocol completes in under 30 minutes from `git clone` on a clean machine.
-3. The headline ratio `t_SP1_Groth16 / t_Stwo` is reported with median, IQR, min, max, and stddev over a minimum of 10 measured runs per prover.
-4. A `RESULTS.md` file reports results on each of (wall-clock, peak RSS, proof size, verify time, constraint count, setup cost) with apples-to-apples caveats called out explicitly.
-
----
-
-## 2. Proof statement (locked)
-
-The proof attests, in zero knowledge over a secret reversible classical circuit `C`:
-
-> There exists a reversible classical circuit `C` composed of NOT, CNOT, and Toffoli gates such that for the public test-case set `T = {(x_i, y_i)}_{i=1..N}`, executing `C` on each `x_i` produces the corresponding `y_i`, and `C` realises one elliptic-curve point addition over secp256k1.
-
-Public inputs:
-- `T` (the fixed test-case set, serialised in `fixtures/v0.1.json`).
-- `H_C`, a commitment to the gate-list encoding of `C`. SP1 side: SHA-256. Stwo side: Blake2s. Both commitments are bound by their respective verifiers.
-
-Secret input (witness):
-- `C` itself, the gate-list encoding.
-
-The simulator semantics on both sides are the same gate-by-gate semantics implemented in `tanujkhattar/zkp_ecc/lib/src/sim.rs`. Both sides ingest the same `fixtures/v0.1.json`. The only intentional divergence is the hash function used to commit to `C`, called out below in §6.4.
-
----
-
-## 3. Workload parameters (read-from-repo, then freeze)
-
-The following fields are extracted from `tanujkhattar/zkp_ecc` at the pinned commit and committed verbatim into `WORKLOAD.md` on day 1 of implementation. Until they are filled in, no Cairo is written.
-
-| Field | Source | Value |
-|---|---|---|
-| Number of test cases `N` | default in `example_zkp_prove.rs` | TBD |
-| Gate count of `C` for one secp256k1 point-add | output of `sim.rs` initialisation | TBD |
-| Bit-stripe width `W` | constant in `sim.rs` hot loop | TBD |
-| Modular-arithmetic gate count | derived from `sim.rs` | TBD |
-| Circuit-commitment scheme on SP1 side | source-read `example_zkp_prove.rs` | TBD (expected: SHA-256 over gate list) |
-| Entropy source for test-case generation | source-read `example_zkp_prove.rs` | SHA-2 XOF, seed TBD |
-
-These six values are the contract. The fixture generator, the Cairo translation, and the result reporting all bind to them. Changing any of them after they are pinned invalidates the prior run series.
-
----
-
-## 4. Hardware specification
-
-### 4.1 Reference rig (canonical, all headline numbers come from this)
-
-| Attribute | Specification |
-|---|---|
-| Architecture | arm64 (Apple Silicon) |
-| Chip | Apple M4 Max |
-| Cores | 16 total (12 performance + 4 efficiency) |
-| Cores used by prover | 1 |
-| RAM | 48 GB unified memory |
-| Storage | internal NVMe, ≥50 GB free |
-| OS | macOS 26.2 (build 25C56) |
-| Power | AC, low-power mode disabled (`pmset -b lowpowermode 0`) |
-| Network | offline for measured runs (Wi-Fi and Bluetooth off) |
-
-### 4.2 CI rig (Linux, optional, separate column)
-
-Used for automated regression runs in CI only. Never substitutes for the reference rig in headline numbers.
-
-| Attribute | Specification |
-|---|---|
-| Architecture | x86_64 |
-| CPU | recorded per-run in `versions.lock`; minimum 8 physical cores at ≥3.5 GHz base |
-| Cores used by prover | 1, pinned with `taskset -c 0` |
-| Frequency | governor `performance`, turbo disabled (`intel_pstate/no_turbo=1` or AMD `cpufreq/boost=0`) |
-| RAM | ≥32 GB DDR4/DDR5 |
-| Swap | disabled via `swapoff -a` for the run series |
-| OS | Ubuntu 24.04 LTS, kernel ≥6.5 |
-
-### 4.3 What single-core, no-GPU means in practice
-
-The following environment variables are exported in every shell that invokes either prover:
+## Corpus layout
 
 ```
-CUDA_VISIBLE_DEVICES=""
-RAYON_NUM_THREADS=1
-TOKIO_WORKER_THREADS=1
-OMP_NUM_THREADS=1
-RUST_LOG=info
+SPEC.md                                  ← this file
+PRD.md                                   ← historical statement of intent
+docs/
+├── spec/
+│   ├── 00-overview.md                   thesis, goals, non-goals, success criteria
+│   ├── 01-architecture.md               system shape, module boundaries, data flow
+│   ├── 02-public-api.md                 contracts (fixture, wrappers, entry points, outputs)
+│   ├── 03-data-model.md                 schemas and invariants for every persisted artifact
+│   ├── 04-error-model.md                error taxonomy, failure modes, recovery
+│   ├── 05-observability.md              logging, metrics, tracing, redaction
+│   ├── 06-security.md                   threat model, trust boundaries, secrets, licensing
+│   ├── 07-testing-strategy.md           test pyramid, property + integration + methodology
+│   ├── 08-performance-budget.md         latency/throughput/memory targets
+│   ├── 09-release-and-versioning.md     semver, deprecation, changelog discipline
+│   └── 10-glossary.md                   canonical terms
+└── rfcs/
+    ├── RFC-0001-workload-pinning.md             §3 workload-parameter freeze
+    ├── RFC-0002-fixture-pipeline.md             §6 generator + schema
+    ├── RFC-0003-reference-simulator.md          sim_reference.py
+    ├── RFC-0004-cairo-circuit-design.md         M31 limbs, gate exec, in-circuit Blake2s
+    ├── RFC-0005-commitment-divergence.md        SHA-256 vs Blake2s on the two sides
+    ├── RFC-0006-sp1-patch-surface.md            <50-line SP1 patch boundary
+    ├── RFC-0007-wrapper-contract.md             bin/run_*.sh and bin/verify_*.sh symmetry
+    ├── RFC-0008-measurement-protocol.md         M1..M10, hyperfine + gnu-time
+    ├── RFC-0009-single-core-no-gpu.md           enforcement + macOS gap
+    ├── RFC-0010-environmental-hygiene.md        preflight, thermal, discard rules
+    ├── RFC-0011-reporting.md                    RESULTS.md template + disclosures
+    ├── RFC-0012-versions-lock.md                pinned-toolchain manifest
+    ├── RFC-0013-reproducibility-envelope.md     tiered reproducibility
+    └── RFC-0014-governance.md                   licensing, CI, contributor workflow
 ```
 
-macOS reference rig: single-core CPU pinning is not exposed by the kernel. The harness uses `taskpolicy -c utility` to confine the process to performance cores plus the thread-count caps above to keep concurrent work at 1. The gap (no hard single-core affinity) is documented in `RESULTS.md`.
+Schemas live at `docs/spec/schemas/` (JSON Schema, draft 2020-12). Templates live at `docs/spec/templates/`. They are referenced from the documents above.
 
-Linux CI rig: invocation prefix `taskset -c 0`.
+## RFC index
 
-Both provers must be invoked through their single-threaded CPU backends. SP1's CUDA prover and Stwo's GPU and sharded-prover paths are explicitly off-limits for v0.1.
-
-GPU activity must be zero during measured runs. The harness asserts this on macOS by sampling `powermetrics --samplers gpu_power -n 1 -i 1000` before and after each run; non-zero GPU residency invalidates the run.
-
----
-
-## 5. Software specification
-
-### 5.1 Toolchain matrix (pinned in `versions.lock`)
-
-| Tool | Source | Pin |
-|---|---|---|
-| `rustc` | rustup, channel `stable` | exact version at start of work, recorded via `rustc --version --verbose` |
-| `cargo` | rustup | matches `rustc` |
-| SP1 | `succinctlabs/sp1` | version pinned in `tanujkhattar/zkp_ecc/Cargo.lock` |
-| `sp1up` toolchain | `succinctlabs/sp1` | matches SP1 |
-| Stwo | `starkware-libs/stwo` | specific commit SHA on `main`, recorded |
-| Cairo | `starkware-libs/cairo` | version compatible with the pinned Stwo commit |
-| `uv` | astral-sh release | ≥0.5, pinned by SHA-256 in `versions.lock` |
-| Python | managed by `uv`, declared in `pyproject.toml` | `>=3.12,<3.14` |
-| `hyperfine` | upstream release | ≥1.18 |
-| `gnu-time` | brew (coreutils on macOS), apt on Linux | latest |
-
-`versions.lock` is regenerated by `scripts/lock_versions.sh` and committed before any measured run.
-
-### 5.2 Build invocation
-
-Reference rig (macOS, arm64). Identical invocation on the Linux CI rig.
-
-```bash
-# SP1 side
-git clone https://github.com/tanujkhattar/zkp_ecc.git sp1-side
-( cd sp1-side && cargo build --release --bin example_zkp_prove )
-
-# Stwo side
-git clone https://github.com/starkware-libs/stwo.git
-( cd stwo && git checkout <pinned-sha> && cargo build --release )
-
-# Local Cairo translation
-( cd stwo-side && cargo build --release )
-
-# Python tooling (fixture generator + analysis scripts)
-uv sync --frozen
-```
-
-Both Rust builds use `--release`. No `--features` flags beyond defaults unless required to disable a GPU or multi-thread default, in which case the flag is documented in `BUILD.md`. The Python environment is fully declared in `pyproject.toml` with a committed `uv.lock`; `uv sync --frozen` is the only entry point.
-
-### 5.3 Stwo-side workload (what we write)
-
-A Cairo program in `stwo-side/circuit.cairo` that:
-
-1. Reads `fixtures/v0.1.json`, treating `T` and `H_C` (the Blake2s commitment) as public inputs.
-2. Reads the gate-list encoding of `C` as the secret witness.
-3. Implements the gate-by-gate semantics of `sim.rs`: NOT flips one bit, CNOT XORs one bit into another, Toffoli ANDs two control bits into a target bit.
-4. For each test case `(x_i, y_i)` in `T`, sets the initial register state from `x_i`, applies `C`, and asserts the final register state equals `y_i`.
-5. Computes Blake2s over the canonical serialisation of `C` and asserts equality with `H_C`.
-
-Design parameters to settle before writing Cairo:
-
-| Parameter | Decision |
-|---|---|
-| Base field | M31 (Mersenne-31), as Stwo natively requires |
-| 256-bit element representation | 9 × 31-bit limbs (one limb of slack for carry handling) |
-| Gate encoding | flat array of `(opcode: u8, target: u16, ctrl_a: u16, ctrl_b: u16)` tuples |
-| `|C|` representation | fixed-length array, padded with no-op gates to a power of two |
-| Bit-stripe handling | mirror what `sim.rs` does at the same `W` |
-| Circuit commitment | Blake2s over the canonical byte serialisation of the gate-list array |
-| Per-test-case state | bit-vector of width 256 (or width set by `sim.rs`), packed into 9 limbs |
-
-### 5.4 SP1-side workload (what we modify minimally)
-
-`example_zkp_prove.rs` is modified to:
-
-1. Accept `fixtures/v0.1.json` as its only test-case source. The example's current internal SHA-2 XOF derivation of test cases is replaced by a deserialise-from-JSON path. No other logic changes.
-2. Emit the proof to a path passed on the command line.
-
-Patch lives in `sp1-side-patches/` as a single `.patch` file applied at build time. Net diff target: under 50 lines. Anything larger triggers escalation.
-
-The SP1 verifier is unmodified and invoked through SP1's standard Groth16 verify entry point.
-
----
-
-## 6. Fixtures (the apples-to-apples bridge)
-
-### 6.1 Generator
-
-A Python script at `python/grover_tax/gen_fixtures.py`, invoked via `uv run gen-fixtures`. Deterministic. No external network calls. Dependencies declared in `pyproject.toml` (stdlib `hashlib` plus `coincurve` for secp256k1 reference math); resolved by `uv` and locked in `uv.lock`. Type-checked under `mypy --strict`, linted under `ruff`.
-
-Inputs to the generator (constants in the script, committed):
-
-- `SEED = b"grover-tax-v0.1-2026-05"` (32 bytes after SHA-256 expansion)
-- `N` = the value pinned in §3
-- `W` = the bit-stripe width pinned in §3
-
-### 6.2 Procedure
-
-1. SHA-2 XOF on `SEED` yields a byte stream.
-2. Consume the byte stream to produce `N` test-case inputs `x_i`. Each `x_i` is a tuple of two secp256k1 affine points `(P_i, Q_i)`.
-3. Compute `y_i = P_i + Q_i` using `coincurve` as the reference adder. This is the ground truth.
-4. Construct the gate-list `C` for the chosen secp256k1 point-add implementation. The gate list is the same gate list `sim.rs` emits when initialised for one point-addition.
-5. Cross-validate: feed `C` and the `x_i` through a Python reimplementation of the `sim.rs` gate semantics. The output must equal `y_i` for every test case. If not, the Python reimplementation is wrong; do not adjust the fixtures, fix the reimplementation.
-6. Compute `sha256(C_serialised)` and `blake2s(C_serialised)` using identical canonical serialisation.
-7. Emit `fixtures/v0.1.json`.
-
-### 6.3 Fixture schema
-
-```json
-{
-  "version": "v0.1",
-  "generator_commit": "<git sha of the repo at generation time>",
-  "seed_hex": "...",
-  "n_samples": 0,
-  "bit_stripe_width": 0,
-  "circuit_serialisation_format_version": 1,
-  "circuit_byte_serialisation_hex": "...",
-  "circuit_commitment_sha256_hex": "...",
-  "circuit_commitment_blake2s_hex": "...",
-  "test_cases": [
-    {"x_hex": "...", "y_hex": "..."}
-  ]
-}
-```
-
-The full `C` byte serialisation is included so any third party can recompute both commitments independently.
-
-### 6.4 The intentional divergence
-
-SP1 binds to `circuit_commitment_sha256_hex`. Stwo binds to `circuit_commitment_blake2s_hex`. The underlying `circuit_byte_serialisation_hex` is bit-identical. Both verifiers therefore attest to the same circuit `C`. Only the binding hash differs.
-
-This is the only deviation from full apples-to-apples in v0.1. Implementing SHA-2 in Cairo would dominate the Stwo wall-clock and confound the comparison. The choice of Blake2s over Poseidon is deliberate: Blake2s is in the same structural family as SHA-2 (bit-oriented, ARX-style) and Stwo Cairo has a Blake2s built-in, making the comparison closer in kind than Poseidon would be.
-
-This divergence is documented in `RESULTS.md` and in the README headline.
-
----
-
-## 7. Measurement specification
-
-### 7.1 Metric set
-
-| ID | Metric | Unit | Capture |
+| RFC | Subsystem | Status | Decision locked |
 |---|---|---|---|
-| M1 | Proof generation wall-clock | seconds | `hyperfine --warmup 1 --runs 10 --export-json` |
-| M2 | Proof generation peak RSS | MiB | `gnu-time -v` field "Maximum resident set size" |
-| M3 | Proof generation user CPU time | seconds | `gnu-time -v` field "User time" |
-| M4 | Proof generation system CPU time | seconds | `gnu-time -v` field "System time" |
-| M5 | Verifier wall-clock | milliseconds | `hyperfine --warmup 3 --runs 50 --export-json` |
-| M6 | Proof file size | bytes | `stat -f %z` (macOS) / `stat -c %s` (Linux) |
-| M7 | Trace rows / constraint count | count | prover stdout with `RUST_LOG=info` |
-| M8 | Setup phase time (SP1+Groth16 only) | seconds | dedicated one-shot timing |
-| M9 | Setup output size (proving + verifying key) | bytes | same `stat` invocation as M6 |
-| M10 | Disk writes during proving | bytes | `iostat -d -w 1` (macOS) / `iostat -dxk 1` (Linux) sampled, integrated |
+| RFC-0001 | Workload pin | Accepted | Six fields in `WORKLOAD.md` frozen against upstream commit; CI gate rejects `TBD`. |
+| RFC-0002 | Fixture pipeline | Accepted | Deterministic Python generator + JSON Schema + `--check` mode. |
+| RFC-0003 | Reference simulator | Accepted | Pure Python re-implementation of `sim.rs` as cross-validation oracle. |
+| RFC-0004 | Cairo circuit | Accepted | `[u31; 9]` for 256-bit state; constant-cost `step()`; in-circuit Blake2s commitment. |
+| RFC-0005 | Commitment divergence | Accepted | SP1 = SHA-256 (upstream native); Stwo = Blake2s. Both bind the same bytes. |
+| RFC-0006 | SP1 patch | Accepted | < 50-line patch reading fixture from JSON + emitting proof to argv. |
+| RFC-0007 | Wrapper contract | Accepted | `bin/run_<prover>.sh <fixtures> <output>`; `bin/verify_<prover>.sh <proof>`; symmetric. |
+| RFC-0008 | Measurement | Accepted | hyperfine `--warmup 1 --runs 10` (M1); `--warmup 3 --runs 50` (M5); gnu-time `-v` for M2/M3/M4. |
+| RFC-0009 | Single-core / no-GPU | Accepted | Env caps + OS affinity + GPU residency check; macOS gap disclosed. |
+| RFC-0010 | Hygiene | Accepted | `preflight.sh`, thermal protocol, day-1/day-2 stability gate, locked discard rules. |
+| RFC-0011 | Reporting | Accepted | `RESULTS.md` template, required disclosures, methodology lint, ratio convention. |
+| RFC-0012 | Versions lock | Accepted | `versions.lock` JSON; `preflight.sh` drift check. |
+| RFC-0013 | Reproducibility envelope | Accepted | Three tiers (byte-stable, number-stable, distribution-stable); fixture is Tier 1. |
+| RFC-0014 | Governance | Accepted | MIT root; CI matrix; CODEOWNERS; branch protection; submodule consumption. |
 
-M10 is informational only and not part of the headline. It surfaces if either prover spills heavily to disk.
+## Reading order
 
-### 7.2 Capture script (`scripts/measure.sh`)
+- **Reproducer** (clone-and-run): `README.md` → `RESULTS.md` (after running).
+- **Reviewer** (judging fairness): `docs/spec/00-overview.md`, then `RFC-0005`, `RFC-0009`, `RFC-0011`.
+- **Implementer** (writing code): `docs/spec/01-architecture.md`, `02-public-api.md`, `03-data-model.md`, then the RFC for the subsystem.
+- **Operator** (running the measurement series): `docs/spec/05-observability.md`, `08-performance-budget.md`, `RFC-0008`, `RFC-0010`.
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
+## Open questions
 
-PROVER="$1"           # sp1 | stwo
-RUN_ID="$2"           # epoch-ts + short hash
-OUT="results/${PROVER}_v0.1_${RUN_ID}"
-mkdir -p "$(dirname "$OUT")"
+The corpus carries 7 explicit `OPEN-Q-*` open questions, all marked with owner and target resolution:
 
-export CUDA_VISIBLE_DEVICES=""
-export RAYON_NUM_THREADS=1
-export TOKIO_WORKER_THREADS=1
-export OMP_NUM_THREADS=1
+- `OPEN-Q-2.1` — Whether to inline reproduction recipe in fixture file. Decided: no.
+- `OPEN-Q-4.1` — Limb-count choice (9 vs 11). Decided: 9, revisit if reduction overhead is excessive.
+- `OPEN-Q-6` — Supply-chain hardening (signing, full SBOM). Decided: out of scope for `v0.1`.
+- `OPEN-Q-8.1` — `iostat_capture.sh` interaction with measured window. Decided: M10 informational only.
+- `OPEN-Q-9.1` — Future macOS hard-core-pinning if exposed. Watch list.
+- `OPEN-Q-10.1` — Whether day-2 run-order reversal is tooling-enforced. Decided: yes.
+- `OPEN-Q-11.1` — CSV companion to `RESULTS.md`. Decided: no for `v0.1`.
+- `OPEN-Q-12.1` — Record macOS marketing build in `versions.lock`. Decided: yes (follow-up patch).
+- `OPEN-Q-13.1` — Graduate to SLSA-3 / Sigstore. Post-`v0.1`.
+- `OPEN-Q-13.2` — Publish reference-rig binaries as release artifacts. Currently no.
+- `OPEN-Q-14.1` — When to add second maintainer. Trigger defined.
+- `OPEN-Q-14.2` — Require GPG-signed commits on `main`. Currently no.
 
-if [[ "$(uname)" == "Darwin" ]]; then
-  PREFIX="taskpolicy -c utility"
-  TIME_BIN="gtime"
-  STAT_CMD="stat -f %z"
-else
-  PREFIX="taskset -c 0"
-  TIME_BIN="/usr/bin/time"
-  STAT_CMD="stat -c %s"
-fi
+All open questions are *informational* or have decisions; none block `v0.1` implementation.
 
-PROVE_CMD="$PREFIX ./bin/run_${PROVER}.sh fixtures/v0.1.json ${OUT}.proof"
-VERIFY_CMD="$PREFIX ./bin/verify_${PROVER}.sh ${OUT}.proof"
+## What this corpus does not do
 
-# M1: wall-clock distribution
-hyperfine --warmup 1 --runs 10 --export-json "${OUT}.timing.json" "$PROVE_CMD"
+- It does not implement anything. Implementation is filed as GitHub issues per `docs/roadmap/IMPLEMENTATION.md`.
+- It does not produce numbers. Numbers come from running `scripts/run_all.sh` on the reference rig.
+- It does not audit upstream provers. SP1 and Stwo are taken on their own terms.
 
-# M2 M3 M4: representative single run under gnu-time
-$TIME_BIN -v -o "${OUT}.time.txt" $PROVE_CMD
+## Provenance
 
-# M6: proof size
-$STAT_CMD "${OUT}.proof" > "${OUT}.proof_size.txt"
+- Source of intent: `PRD.md`, frozen as historical record.
+- Source of truth for implementation: this spec corpus.
+- Source of truth for numbers: `RESULTS.md`, generated by `analyze.py`.
+- Source of truth for toolchain: `versions.lock`.
 
-# M7: trace + constraints scraped from a debug run
-RUST_LOG=info $PROVE_CMD 2>&1 | tee "${OUT}.proverlog.txt"
+## Status
 
-# M5: verifier distribution
-hyperfine --warmup 3 --runs 50 --export-json "${OUT}.verify.json" "$VERIFY_CMD"
-```
-
-### 7.3 Setup-cost capture (SP1 only)
-
-`scripts/measure_setup.sh` runs the Groth16 trusted-setup phase once, captures wall-clock and key sizes (M8, M9), and writes `results/sp1_setup.json`. The setup cost is reported separately and is explicitly excluded from the headline proof-generation ratio. The headline reports it as a one-time structural cost.
-
-### 7.4 Wrapper contract
-
-`bin/run_sp1.sh` and `bin/run_stwo.sh` take exactly two positional arguments: `<fixtures.json> <output_proof_path>`. They exit 0 on success and non-zero on failure. Stdout is the prover's log. Stderr is reserved for measurement-side errors.
-
-`bin/verify_sp1.sh` and `bin/verify_stwo.sh` take one positional argument: `<proof_path>`. They read the same `fixtures/v0.1.json` from a known relative path. Exit 0 means valid, non-zero means invalid. No human-readable output on stdout in the success path.
-
-This symmetric contract makes the harness prover-agnostic.
-
----
-
-## 8. Environmental hygiene
-
-### 8.1 Power and thermal state (reference rig, macOS)
-
-Before any measured run:
-
-```bash
-# Confirm AC power
-pmset -g ps | grep -q "AC Power"
-
-# Disable low-power mode
-sudo pmset -b lowpowermode 0
-sudo pmset -a lowpowermode 0
-
-# Disable App Nap and automatic sleep during the run series
-caffeinate -dimsu &
-CAFFEINATE_PID=$!
-
-# Disable Spotlight indexing on the working tree
-sudo mdutil -i off "$(pwd)"
-```
-
-After the run series, reverse these. `scripts/preflight.sh` asserts the AC-power and low-power-mode states and exits non-zero on any failure.
-
-macOS does not expose a kernel knob to disable Apple Silicon's dynamic frequency scaling. The harness compensates with the warmup run, the cool-down protocol in §8.3, and the discard rules in §8.4. The lack of hard frequency pinning is recorded in `RESULTS.md`.
-
-### 8.1b Power and thermal state (Linux CI rig)
-
-```bash
-sudo cpupower frequency-set -g performance
-echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo  # Intel
-# On AMD:
-# echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost
-```
-
-`scripts/preflight.sh` asserts:
-
-```bash
-test "$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)" = "performance"
-test "$(cat /sys/devices/system/cpu/intel_pstate/no_turbo)" = "1"
-```
-
-### 8.2 Background-noise checklist (macOS reference rig)
-
-- Quit browsers, Slack, IDEs, Docker Desktop, Xcode background services.
-- `launchctl print user/$UID` to enumerate running user agents; stop any non-essential ones with `launchctl bootout`.
-- Wi-Fi off (`networksetup -setairportpower en0 off`), Bluetooth off.
-- Spotlight indexing disabled on the working tree (see §8.1).
-- Time Machine paused for the run window.
-- External displays disconnected (reduces unrelated GPU/IO activity).
-
-### 8.3 Thermal protocol
-
-- Cold-boot the laptop. Wait 5 minutes for background daemons to settle.
-- Run one throwaway invocation of each prover. Discard.
-- Measured series for SP1: 10 runs via hyperfine.
-- 5-minute cool-down.
-- Measured series for Stwo: 10 runs via hyperfine.
-- During every measured run: sample temperatures via `sudo powermetrics --samplers smc -n 1 -i 1000` on macOS or `sensors` on Linux. Any P-core temperature reading above 95°C on Apple Silicon (or 90°C junction on x86) invalidates the run series.
-- Day-2 repeat. If day-1 and day-2 medians differ by more than 5%, investigate before publishing.
-
-### 8.4 Discard rules
-
-A run is discarded if:
-
-- Thermal sampling exceeded the threshold in §8.3.
-- `powermetrics` reports non-zero GPU residency during the run window.
-- Swap activity is non-zero (`sysctl vm.swapusage` on macOS, `/proc/swaps` on Linux).
-- The first run of any series (cold cache), regardless of timing.
-
-Discards are recorded with reason in `results/discards.log`.
-
----
-
-## 9. Reporting
-
-### 9.1 Headline table (in `RESULTS.md`)
-
-| Metric | SP1+Groth16 | Stwo | Ratio (SP1 / Stwo) |
-|---|---|---|---|
-| Proof gen median (10 runs) | TBD s | TBD s | TBD× |
-| Proof gen IQR | TBD s | TBD s | n/a |
-| Verifier median (50 runs) | TBD ms | TBD ms | TBD× |
-| Peak RSS | TBD MiB | TBD MiB | TBD× |
-| Proof size | TBD bytes | TBD bytes | TBD× |
-| Trace / constraints | TBD | TBD | n/a |
-| Trusted setup required | yes (`E` s one-time, `F` MiB keys) | no | structural |
-
-### 9.2 Distribution plots
-
-`uv run plot` emits, committed to `results/plots/`:
-
-- Histogram of proof-gen wall-clock per prover, overlaid.
-- Bar chart of medians with IQR error bars across both provers and both metrics (proof gen, verify).
-- A side-by-side day-1 / day-2 comparison for stability evidence.
-
-### 9.3 Apples-to-apples disclosures
-
-`RESULTS.md` includes a dedicated section listing every known divergence between the two sides:
-
-1. Hash function for circuit commitment: SHA-256 (SP1) vs Blake2s (Stwo). Justification per §6.4.
-2. Field choice: BabyBear (SP1) vs M31 (Stwo). Structural to the provers, not a knob.
-3. Trusted setup: required for Groth16 wrap on SP1 side, absent on Stwo side. Reported separately, not folded into the headline ratio.
-4. Thread fan-out: documented per-prover in `RESULTS.md` if either prover's user CPU time exceeds wall-clock time by more than 10% (indicating residual concurrency despite the env caps). Both provers must be reported on the same fan-out basis.
-
-### 9.4 Reproduction recipe
-
-`README.md` opens with:
-
-> Reference rig: see `versions.lock`.
-> Run `./scripts/run_all.sh`. Wall time approximately 25 minutes from a clean clone. Output lands in `RESULTS.md` and `results/`.
-
-A 30-minute clean-clone-to-results time is a hard target. If `run_all.sh` exceeds 45 minutes on the reference rig, the workload size or measurement protocol must be revisited.
-
----
-
-## 10. Repository layout
-
-```
-grover-tax/
-├── README.md
-├── WORKLOAD.md
-├── BUILD.md
-├── RESULTS.md
-├── LICENSE                       # MIT
-├── versions.lock
-├── pyproject.toml                # uv-managed Python project
-├── uv.lock
-├── fixtures/
-│   └── v0.1.json
-├── python/
-│   └── grover_tax/
-│       ├── __init__.py
-│       ├── gen_fixtures.py       # entry: `uv run gen-fixtures`
-│       ├── sim_reference.py      # Python reimplementation of sim.rs semantics
-│       ├── analyze.py            # entry: `uv run analyze`
-│       └── plot.py               # entry: `uv run plot`
-├── scripts/
-│   ├── lock_versions.sh
-│   ├── preflight.sh
-│   ├── measure.sh
-│   ├── measure_setup.sh
-│   └── run_all.sh
-├── bin/
-│   ├── run_sp1.sh
-│   ├── verify_sp1.sh
-│   ├── run_stwo.sh
-│   └── verify_stwo.sh
-├── sp1-side/                     # git submodule of tanujkhattar/zkp_ecc
-├── sp1-side-patches/
-│   └── 0001-read-fixtures-from-json.patch
-├── stwo-side/
-│   ├── Cargo.toml
-│   ├── circuit.cairo
-│   ├── prover_main.rs
-│   └── verifier_main.rs
-└── results/
-    ├── plots/
-    ├── discards.log
-    └── (JSON outputs from measure.sh)
-```
-
-### 10.1 Licensing
-
-MIT for the repo root. SP1 and Stwo submodules retain their upstream licences. The Apache-2.0 / MIT compatibility check is run by `scripts/check_licenses.sh` and required by `run_all.sh` before any measurement begins.
-
-### 10.2 Public repo discipline
-
-Because the repo is MIT and public from day one:
-
-- No commit touches `fixtures/v0.1.json` after the day-1 generation pass without a corresponding version bump.
-- No commit touches `versions.lock` after the first measured run without invalidating the prior `results/`.
-- `results/` history is preserved; bad runs are not deleted, they are moved under `results/archive/<date>/` with a `WHY.md` next to them.
+`v0.1` — specification frozen; implementation issues filed; reference-rig measurements pending.
