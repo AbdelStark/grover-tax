@@ -28,3 +28,9 @@ license = "MIT"
 # built-in, range checks). Dependency pin lands with the lock file
 # (#7); the bare entry point in lib.cairo today does not need any
 # external Cairo dependency.
+
+[dev-dependencies]
+# `cairo_test` is the in-tree test runner — `scarb cairo-test` picks up
+# every `#[test]` / `#[should_panic]` attribute under `src/` once the
+# plugin is on the dev path.
+cairo_test = "2.15.0"
