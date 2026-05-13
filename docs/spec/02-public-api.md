@@ -1,0 +1,124 @@
+# Public API
+
+The "public API" of a benchmarking project is unusual: it is not a Python or Rust library surface that downstream code imports. It is the set of contracts that an outside party — a reproducer, a reviewer, a downstream automation script — relies on. Everything in this document is binding. Changing any of it requires a version bump.
+
+## Contracts
+
+### C1. Fixture file (`fixtures/v0.1.json`)
+
+The canonical input to both provers. Schema is normative; see `03-data-model.md` for the full JSON Schema (`docs/spec/schemas/fixture-v0.1.schema.json`). Filename is binding: `fixtures/v0.1.json` for `v0.1`; a future `v0.2` lives at `fixtures/v0.2.json`.
+
+A reproducer can:
+
+- Reconstruct `circuit_commitment_sha256_hex` and `circuit_commitment_blake2s_hex` from `circuit_byte_serialisation_hex` using any conforming SHA-256 / Blake2s implementation. Both commitments must match the file.
+- Replace either prover with an alternative implementation that consumes the same fixture and produces a proof that the same verifier accepts.
+
+The fixture is immutable post-generation. The only mutation permitted on a generated fixture is replacement by a version-bumped successor.
+
+### C2. Prover wrapper (`bin/run_<prover>.sh`)
+
+```
+bin/run_<prover>.sh <fixtures_path> <output_proof_path>
+```
+
+- `<prover>` ∈ {`sp1`, `stwo`}.
+- Inputs: read-only access to `<fixtures_path>`.
+- Output: writes one file at `<output_proof_path>`. Format is prover-defined; the harness treats it as opaque.
+- Stdout: the prover's log. The harness captures it for M7 (constraint count, trace rows).
+- Stderr: reserved for the wrapper itself to emit harness-side errors (env var misses, missing fixture file). The prover's stderr is folded into stdout.
+- Exit codes: `0` on success; `1` on prover-internal error; `2` on harness-side error (precondition violation). See `04-error-model.md`.
+
+The two wrappers must be drop-in interchangeable. The measurement harness depends on this symmetry to remain prover-agnostic.
+
+### C3. Verifier wrapper (`bin/verify_<prover>.sh`)
+
+```
+bin/verify_<prover>.sh <proof_path>
+```
+
+- Reads `fixtures/v0.1.json` from a fixed relative path (`fixtures/v0.1.json` from the repo root).
+- Exit `0` means the proof is valid against the fixture. Exit non-zero means the proof is invalid or an error occurred.
+- Stdout: empty in the success path. Any output on stdout in success indicates a contract violation.
+- Stderr: human-readable diagnostic on failure.
+
+### C4. Python entry points
+
+Declared in `pyproject.toml` under `[project.scripts]`. Invoked via `uv run <name>`:
+
+| Entry point | Module | Purpose |
+|---|---|---|
+| `gen-fixtures` | `grover_tax.gen_fixtures:main` | Regenerate `fixtures/v0.1.json`. Idempotent given the pinned `SEED` and `WORKLOAD.md`. |
+| `analyze` | `grover_tax.analyze:main` | Ingest `results/*.json` and emit `RESULTS.md`. |
+| `plot` | `grover_tax.plot:main` | Emit `results/plots/*.png`. |
+| `sim-check` | `grover_tax.sim_reference:main` | Run the reference simulator over a fixture and assert equality with `y_i`. Used in CI. |
+
+All entry points must:
+
+- Take no positional arguments by default (read from repo-relative paths).
+- Accept `--help` and emit a usage string.
+- Accept `--check` (where meaningful) and return non-zero if the artifact they would produce differs from the one currently on disk. This is the CI gate that catches "the fixture was edited by hand".
+- Be `mypy --strict` clean and `ruff` clean.
+
+### C5. Output files
+
+After a successful `scripts/run_all.sh`, the following files exist:
+
+| Path | Purpose | Producer |
+|---|---|---|
+| `RESULTS.md` | Headline tables, distribution stats, apples-to-apples disclosures | `analyze` |
+| `results/sp1_v0.1_<run_id>.timing.json` | `hyperfine` proof-gen timings | `measure.sh` |
+| `results/sp1_v0.1_<run_id>.time.txt` | `gnu-time -v` output (peak RSS, user CPU, sys CPU) | `measure.sh` |
+| `results/sp1_v0.1_<run_id>.verify.json` | `hyperfine` verifier timings | `measure.sh` |
+| `results/sp1_v0.1_<run_id>.proverlog.txt` | Prover stdout with `RUST_LOG=info` | `measure.sh` |
+| `results/sp1_v0.1_<run_id>.proof_size.txt` | Proof file size in bytes | `measure.sh` |
+| `results/stwo_v0.1_<run_id>.*` | Same five files for the Stwo side | `measure.sh` |
+| `results/sp1_setup.json` | One-shot trusted setup wall-clock + key sizes | `measure_setup.sh` |
+| `results/discards.log` | Reasons for discarded runs (thermal, GPU, swap, cold cache) | `measure.sh` |
+| `results/plots/wallclock_hist.png` | Overlaid histograms, both provers | `plot` |
+| `results/plots/medians_bar.png` | Median + IQR bar chart | `plot` |
+| `results/plots/day1_day2.png` | Stability comparison plot | `plot` |
+| `versions.lock` | Pinned toolchain matrix | `lock_versions.sh` |
+
+`<run_id>` is `<epoch_ts>-<short_repo_sha>` (deterministic per invocation).
+
+### C6. Versions lock (`versions.lock`)
+
+A JSON file with the schema in `03-data-model.md` (`versions-lock-v1.schema.json`). Regenerated by `scripts/lock_versions.sh`. Captures: `rustc` version + verbose, `cargo` version, SP1 pin (Cargo.lock-derived), Stwo SHA, Cairo version, `uv` version + SHA-256, Python version (from `uv` resolution), `hyperfine` version, `gnu-time` version, kernel version, model identifier (CPU, RAM).
+
+`versions.lock` is committed. A measured run with a `versions.lock` that differs from the committed copy is invalid.
+
+## Versioning policy
+
+This project follows semantic versioning over the *contract surface*, not over the implementation:
+
+- **Major bump** (`v0.x` → `v1.x` or `v1.x` → `v2.x`): any change to the fixture schema, the prover wrapper signature, the metric set (M1–M10), the discard rules, or `RESULTS.md` table structure. Breaks reproducibility against prior published numbers.
+- **Minor bump** (`v0.1` → `v0.2`): additional fields in fixture or `RESULTS.md` that are strictly additive; additional metrics; additional plots. Prior consumers continue to work.
+- **Patch bump** (`v0.1.0` → `v0.1.1`): bug fixes that do not alter numbers. Examples: corrected typos in `RESULTS.md`, fixed exit-code reporting in a wrapper. Re-running `run_all.sh` must produce numerically identical results modulo timing distribution noise.
+
+The `version` field at the top of `fixtures/v0.1.json` matches the fixture-format version, not the project version. A `v0.1.1` patch bump may ship with `fixtures/v0.1.json` unchanged.
+
+## Deprecation policy
+
+There are no deprecations in `v0.1` because there is no `v0.0` to deprecate from. A `v0.2` that supersedes a `v0.1` contract:
+
+1. Lands a deprecation note in `docs/spec/09-release-and-versioning.md` at the `v0.1.x` release immediately preceding it.
+2. Keeps `v0.1` artifacts in `results/archive/v0.1/` (per `09-release-and-versioning.md` §"Archival").
+3. Ships `fixtures/v0.2.json` alongside (not in place of) `fixtures/v0.1.json` if both contracts are still supported during a transition window.
+
+`v0.1` itself is not transitional and has no upstream contract to honour.
+
+## Stability guarantees
+
+For `v0.1`:
+
+- The fixture file is **byte-stable**: same `SEED`, same `WORKLOAD.md`, same `gen_fixtures.py` version → identical bytes.
+- The prover wrapper signature is **frozen**.
+- The measurement scripts may evolve; their *inputs and outputs* are frozen by the wrapper contract.
+- The plot file names are **frozen**.
+- The `RESULTS.md` table columns are **frozen**; new rows or columns require a minor bump.
+
+What is **not** stable in `v0.1`:
+
+- The exact lines of `analyze.py` and `plot.py` (free to refactor as long as outputs do not change).
+- Internal log line formats from the prover wrappers (stdout content is informational; the constraint count line is the only piece `analyze.py` parses, see `RFC-0011`).
+- The structure of `results/discards.log` beyond the documented schema in `03-data-model.md`.
