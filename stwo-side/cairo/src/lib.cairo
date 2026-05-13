@@ -26,6 +26,7 @@ pub mod limbs;
 pub mod gates;
 pub mod serialise;
 pub mod commit;
+pub mod c_tests;
 
 #[derive(Drop, Copy)]
 pub struct Gate {
