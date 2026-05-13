@@ -199,6 +199,108 @@ jobs:
           "
           uv run check-results-md RESULTS.md
 
+  # -- integration-e2e --------------------------------------------------------
+  integration-e2e:
+    name: integration-e2e
+    runs-on: ubuntu-latest
+    # Per RFC-0014 §"CI matrix" and #49: drive the full analyze + plot
+    # pipeline against a synthetic-but-realistic results corpus. CI cannot
+    # build the real prover binaries cheaply, so this job exercises the
+    # *reporting* path: the synthetic input has ≥ 10 M1 samples and ≥ 40
+    # M5 samples per prover so it passes the insufficient-samples gate and
+    # the methodology lint runs against analyze's actual output (not just
+    # the template).
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: uv sync --frozen
+        run: uv sync --frozen
+      - name: Synthesise a small results/ corpus
+        run: |
+          mkdir -p results
+          uv run python -c "
+          import json
+          from pathlib import Path
+          # 12 M1 samples per prover (1 cold-cache discard → 11 valid).
+          sp1_m1 = [1.0 + i * 0.01 for i in range(12)]
+          stwo_m1 = [0.5 + i * 0.005 for i in range(12)]
+          sp1_m5 = [0.04] * 40
+          stwo_m5 = [0.03] * 40
+          for name, times in (
+              ('sp1_v0.1_r1.timing.json', sp1_m1),
+              ('stwo_v0.1_r1.timing.json', stwo_m1),
+              ('sp1_v0.1_r1.verify.json', sp1_m5),
+              ('stwo_v0.1_r1.verify.json', stwo_m5),
+          ):
+              Path('results') / name
+              Path(f'results/{name}').write_text(
+                  json.dumps({'results': [{'command': 'x', 'times': times}]}),
+                  encoding='utf-8',
+              )
+          # Realistic gnu-time records — user-CPU ≈ wall-clock (no concurrency flag).
+          for prover, wall in (('sp1', 1.05), ('stwo', 0.525)):
+              Path(f'results/{prover}_v0.1_r1.time.txt').write_text(
+                  '\tCommand being timed: \"prover\"\n'
+                  f'\tUser time (seconds): {wall:.2f}\n'
+                  '\tSystem time (seconds): 0.05\n'
+                  f'\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:{wall:05.2f}\n'
+                  '\tMaximum resident set size (kbytes): 4096\n',
+                  encoding='utf-8',
+              )
+          "
+          ls -la results/
+      - name: uv run analyze
+        run: uv run analyze
+      - name: uv run plot
+        run: uv run plot
+      - name: Inspect produced artifacts
+        run: |
+          test -f RESULTS.md
+          test -f results/plots/wallclock_hist.png
+          test -f results/plots/medians_bar.png
+          test -f results/plots/day1_day2.png
+          # Headline ratio must be present (SP1 / Stwo).
+          grep -q "Ratio (SP1 / Stwo)" RESULTS.md
+      - name: methodology-lint on analyze's actual output
+        run: uv run check-results-md RESULTS.md
+      - name: Upload RESULTS.md + plots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-e2e-output
+          path: |
+            RESULTS.md
+            results/
+
+  # -- methodology-lint -------------------------------------------------------
+  methodology-lint:
+    name: methodology-lint
+    runs-on: ubuntu-latest
+    needs: integration-e2e
+    # Independent re-run of the methodology lint on a fresh checkout, so the
+    # gate stays visible as its own status check rather than buried in the
+    # integration-e2e log. Reads the artifact produced by integration-e2e.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: uv sync --frozen
+        run: uv sync --frozen
+      - name: Download RESULTS.md from integration-e2e
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-e2e-output
+          path: integration-output
+      - name: methodology-lint
+        run: uv run check-results-md integration-output/RESULTS.md
+
   # -- workflow-lint (actionlint) ---------------------------------------------
   workflow-lint:
     name: workflow-lint
