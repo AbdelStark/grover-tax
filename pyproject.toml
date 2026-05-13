@@ -1,0 +1,106 @@
+[project]
+name = "grover-tax"
+version = "0.1.0.dev0"
+description = "Single-laptop, single-core, no-GPU benchmark of Stwo vs SP1+Groth16 on a fixed secp256k1 point-add ZKP."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "grover-tax maintainers" },
+]
+keywords = ["zkp", "benchmark", "stwo", "sp1", "groth16", "secp256k1"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+]
+
+dependencies = [
+  "coincurve==21.0.0",
+  "jsonschema==4.25.1",
+  "jinja2==3.1.6",
+  "matplotlib==3.10.7",
+]
+
+[project.scripts]
+gen-fixtures = "grover_tax.gen_fixtures:main"
+analyze = "grover_tax.analyze:main"
+plot = "grover_tax.plot:main"
+sim-check = "grover_tax.sim_reference:main"
+
+[project.urls]
+Homepage = "https://github.com/AbdelStark/grover-tax"
+Issues = "https://github.com/AbdelStark/grover-tax/issues"
+Specification = "https://github.com/AbdelStark/grover-tax/blob/main/SPEC.md"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/grover_tax"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "python/grover_tax",
+  "pyproject.toml",
+  "README.md",
+  "LICENSE",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==8.4.2",
+  "pytest-cov==7.0.0",
+  "hypothesis==6.143.0",
+  "mypy==1.18.2",
+  "ruff==0.14.4",
+]
+
+[tool.uv]
+required-version = ">=0.9,<1.0"
+
+[tool.uv.sources]
+# All deps come from PyPI. Pinned hashes live in `uv.lock`.
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+mypy_path = "python"
+namespace_packages = true
+explicit_package_bases = true
+files = ["python/grover_tax"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["python"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "PL", "RUF"]
+ignore = [
+  # Long lines in docstrings/data tables are tolerable; the line-length cap
+  # is already 100 which gives breathing room.
+  "E501",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["python/tests"]
+pythonpath = ["python"]
