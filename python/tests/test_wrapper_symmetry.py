@@ -36,10 +36,18 @@ RUN_SP1 = BIN / "run_sp1.sh"
 RUN_STWO = BIN / "run_stwo.sh"
 VERIFY_SP1 = BIN / "verify_sp1.sh"
 VERIFY_STWO = BIN / "verify_stwo.sh"
+WRAPPER_LIB = repo_root() / "scripts" / "wrapper_lib.sh"
 
 RUN_WRAPPERS = (RUN_SP1, RUN_STWO)
 VERIFY_WRAPPERS = (VERIFY_SP1, VERIFY_STWO)
 ALL_WRAPPERS = RUN_WRAPPERS + VERIFY_WRAPPERS
+
+
+def _wrapper_text_with_lib(wrapper: Path) -> str:
+    """Concatenate wrapper text with the sourced helper library — that's the
+    real surface a precondition / grammar check is implemented on, since the
+    library is `source`d into the wrapper at run time."""
+    return wrapper.read_text(encoding="utf-8") + "\n" + WRAPPER_LIB.read_text(encoding="utf-8")
 
 
 def _env_caps() -> dict[str, str]:
@@ -72,8 +80,8 @@ def test_run_wrapper_checks_env_var(wrapper: Path, var: str) -> None:
 
 @pytest.mark.parametrize("wrapper", RUN_WRAPPERS)
 def test_run_wrapper_checks_affinity(wrapper: Path) -> None:
-    """Both `run` wrappers must mention both `taskpolicy` (macOS) and `taskset` (Linux)."""
-    text = wrapper.read_text(encoding="utf-8")
+    """Both `run` wrappers (via the sourced lib) handle both `taskpolicy` and `taskset`."""
+    text = _wrapper_text_with_lib(wrapper)
     assert "taskpolicy" in text
     assert "taskset" in text
 
@@ -89,8 +97,8 @@ def test_run_wrapper_writes_proof_atomically(wrapper: Path) -> None:
 
 @pytest.mark.parametrize("wrapper", RUN_WRAPPERS)
 def test_run_wrapper_enforces_grammar(wrapper: Path) -> None:
-    """Both `run` wrappers must check for `CONSTRAINTS:` and `TRACE_ROWS:` lines."""
-    text = wrapper.read_text(encoding="utf-8")
+    """Both `run` wrappers (via the sourced lib) check `CONSTRAINTS:` and `TRACE_ROWS:`."""
+    text = _wrapper_text_with_lib(wrapper)
     assert "CONSTRAINTS:" in text
     assert "TRACE_ROWS:" in text
     assert "PROVER.STDOUT_GRAMMAR_VIOLATION" in text

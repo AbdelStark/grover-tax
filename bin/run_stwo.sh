@@ -18,6 +18,12 @@
 
 set -euo pipefail
 
+# Load the shared precondition + grammar helpers.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
+# shellcheck source=/dev/null
+source "${REPO_ROOT}/scripts/wrapper_lib.sh"
+
 # -- precondition checks ------------------------------------------------------
 
 usage() {
@@ -52,41 +58,13 @@ fi
 #    Symmetric with bin/run_sp1.sh — same four caps. The Stwo backend uses
 #    Rayon internally; if it ever stops doing so, the precondition is still
 #    correct because the *measurement* is single-threaded regardless.
-require_env() {
-  local var="$1"
-  local want="$2"
-  local got="${!var-__UNSET__}"
-  if [[ "${got}" != "${want}" ]]; then
-    echo "MEASUREMENT.ENV_VAR_MISS: ${var}='${got}' but harness requires '${want}'" >&2
-    exit 2
-  fi
-}
 require_env CUDA_VISIBLE_DEVICES ""
 require_env RAYON_NUM_THREADS 1
 require_env TOKIO_WORKER_THREADS 1
 require_env OMP_NUM_THREADS 1
 
 # 4. Affinity prefix (RFC-0007 §"Preconditions" step 4 / RFC-0009).
-case "$(uname)" in
-  Darwin)
-    if ! command -v taskpolicy >/dev/null 2>&1; then
-      echo "MEASUREMENT.AFFINITY_MISS: taskpolicy not on PATH (required on macOS per RFC-0009)" >&2
-      exit 2
-    fi
-    AFFINITY=(taskpolicy -c utility)
-    ;;
-  Linux)
-    if ! command -v taskset >/dev/null 2>&1; then
-      echo "MEASUREMENT.AFFINITY_MISS: taskset not on PATH (required on Linux per RFC-0009)" >&2
-      exit 2
-    fi
-    AFFINITY=(taskset -c 0)
-    ;;
-  *)
-    echo "MEASUREMENT.AFFINITY_MISS: unsupported platform $(uname); RFC-0009 limits to darwin/linux" >&2
-    exit 2
-    ;;
-esac
+read -ra AFFINITY <<< "$(resolve_affinity)"
 
 # -- locate the Stwo prover binary --------------------------------------------
 
@@ -116,11 +94,8 @@ set -e
 
 cat "${LOG_BUFFER}"
 
-if ! grep -qE '^CONSTRAINTS: [0-9]+$' "${LOG_BUFFER}" \
-   || ! grep -qE '^TRACE_ROWS:[[:space:]]+[0-9]+$' "${LOG_BUFFER}"; then
-  echo "PROVER.STDOUT_GRAMMAR_VIOLATION: missing CONSTRAINTS: / TRACE_ROWS: line(s) in prover output" >&2
-  exit 1
-fi
+# Exactly one CONSTRAINTS: and one TRACE_ROWS: line (RFC-0007 §"Stdout").
+enforce_proverlog_grammar "${LOG_BUFFER}"
 
 if [[ ${PROVER_RC} -ne 0 ]]; then
   echo "PROVER.WITNESS_REJECTED: stwo prover exited ${PROVER_RC}" >&2

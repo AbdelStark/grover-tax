@@ -138,7 +138,13 @@ def test_run_stwo_writes_proof_atomically_via_mv() -> None:
 
 
 def test_run_stwo_writes_constraints_and_trace_rows_check() -> None:
-    text = RUN_STWO.read_text(encoding="utf-8")
-    assert "CONSTRAINTS:" in text
-    assert "TRACE_ROWS:" in text
-    assert "PROVER.STDOUT_GRAMMAR_VIOLATION" in text
+    # Grammar enforcement moved into scripts/wrapper_lib.sh (#31). The
+    # wrapper sources the lib at runtime, so the strings live across both
+    # files now; check the combined text.
+    wrapper_text = RUN_STWO.read_text(encoding="utf-8")
+    lib_text = (repo_root() / "scripts" / "wrapper_lib.sh").read_text(encoding="utf-8")
+    combined = wrapper_text + "\n" + lib_text
+    assert "enforce_proverlog_grammar" in wrapper_text
+    assert "CONSTRAINTS:" in combined
+    assert "TRACE_ROWS:" in combined
+    assert "PROVER.STDOUT_GRAMMAR_VIOLATION" in combined
