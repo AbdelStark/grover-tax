@@ -55,27 +55,14 @@ diff --git a/prover/prove.rs b/prover/prove.rs
 -#[derive(Parser, Debug)]
 -#[command(author, version, about, long_about = None)]
 -struct Args {
--    #[arg(long)]
--    execute: bool,
--    #[arg(long)]
--    prove: bool,
--    #[arg(long)]
--    kmx: String,
--    #[arg(long)]
--    qubit_counts: u64,
--    #[arg(long)]
--    toffoli_counts: u64,
--    #[arg(long)]
--    total_ops: u64,
--    #[arg(long, default_value = "64")]
--    num_tests: u64,
-+/// grover-tax wrapper contract (RFC-0007 §C2):
-+///
-+///   <binary> <fixtures_path> <output_proof_path>
-+///
-+/// Replaces the upstream Shake256-derived test-case generation with a
-+/// JSON deserialise of `fixtures/v0.1.json`. Constraint shape and
-+/// commitment hash are unchanged.
+-    #[arg(long)] execute: bool,
+-    #[arg(long)] prove: bool,
+-    #[arg(long)] kmx: String,
+-    #[arg(long)] qubit_counts: u64,
+-    #[arg(long)] toffoli_counts: u64,
+-    #[arg(long)] total_ops: u64,
+-    #[arg(long, default_value = "64")] num_tests: u64,
++// grover-tax: positional argv per RFC-0007 §C2.
 +#[derive(serde::Deserialize)]
 +struct GroverFixture {
 +    version: String,
@@ -84,12 +71,8 @@ diff --git a/prover/prove.rs b/prover/prove.rs
 +    circuit_byte_serialisation_hex: String,
 +    test_cases: Vec<GroverTestCase>,
 +}
-+
 +#[derive(serde::Deserialize)]
-+struct GroverTestCase {
-+    x_hex: String,
-+    y_hex: String,
- }
++struct GroverTestCase { x_hex: String, y_hex: String }
 
  #[tokio::main]
  async fn main() {
