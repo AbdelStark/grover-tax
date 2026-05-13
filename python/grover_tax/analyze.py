@@ -208,7 +208,7 @@ def _scan_series(
         if m is None:
             continue
         prover = m.group(1)
-        data = json.loads(f.read_text(encoding="utf-8"))
+        data = _load_json(f)
         timings[prover].append(
             (m.group(2), list(data.get("results", [{}])[0].get("times", [])))
         )
@@ -218,7 +218,7 @@ def _scan_series(
         if m is None:
             continue
         prover = m.group(1)
-        data = json.loads(f.read_text(encoding="utf-8"))
+        data = _load_json(f)
         verify[prover].append(
             (m.group(2), list(data.get("results", [{}])[0].get("times", [])))
         )
@@ -233,6 +233,17 @@ def _scan_series(
             gnu[prover].append(parsed)
 
     return timings, verify, gnu
+
+
+def _load_json(f: Path) -> dict[str, Any]:
+    """Read + parse a JSON artifact; map decode errors to REPORT.SCHEMA_INVALID."""
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+    except json.JSONDecodeError as e:
+        raise ReportError(
+            ReportSubcode.SCHEMA_INVALID,
+            f"malformed JSON at {f}: {e}",
+        ) from e
 
 
 def _m1_stats(
