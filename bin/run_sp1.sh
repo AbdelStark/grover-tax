@@ -25,6 +25,13 @@
 
 set -euo pipefail
 
+# Load the shared precondition + grammar helpers (RFC-0007 §"Symmetry CI
+# check" — both wrappers go through the same code path).
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
+# shellcheck source=/dev/null
+source "${REPO_ROOT}/scripts/wrapper_lib.sh"
+
 # -- precondition checks ------------------------------------------------------
 
 usage() {
@@ -56,46 +63,13 @@ if [[ ! -f "${FIXTURES_PATH}" || ! -r "${FIXTURES_PATH}" ]]; then
 fi
 
 # 3. Environment variable assertions (RFC-0007 §"Preconditions" step 3).
-#    Every prover invocation must run single-threaded with no GPU residency.
-require_env() {
-  local var="$1"
-  local want="$2"
-  # `${VAR-__UNSET__}` (no colon) distinguishes "unset" from "set to empty
-  # string". The harness requires CUDA_VISIBLE_DEVICES to be *set to empty*
-  # (no devices visible), which the `:-` form would falsely flag as missing.
-  local got="${!var-__UNSET__}"
-  if [[ "${got}" != "${want}" ]]; then
-    echo "MEASUREMENT.ENV_VAR_MISS: ${var}='${got}' but harness requires '${want}'" >&2
-    exit 2
-  fi
-}
 require_env CUDA_VISIBLE_DEVICES ""
 require_env RAYON_NUM_THREADS 1
 require_env TOKIO_WORKER_THREADS 1
 require_env OMP_NUM_THREADS 1
 
 # 4. Affinity prefix (RFC-0007 §"Preconditions" step 4 / RFC-0009).
-#    macOS: taskpolicy -c utility; Linux: taskset -c 0.
-case "$(uname)" in
-  Darwin)
-    if ! command -v taskpolicy >/dev/null 2>&1; then
-      echo "MEASUREMENT.AFFINITY_MISS: taskpolicy not on PATH (required on macOS per RFC-0009)" >&2
-      exit 2
-    fi
-    AFFINITY=(taskpolicy -c utility)
-    ;;
-  Linux)
-    if ! command -v taskset >/dev/null 2>&1; then
-      echo "MEASUREMENT.AFFINITY_MISS: taskset not on PATH (required on Linux per RFC-0009)" >&2
-      exit 2
-    fi
-    AFFINITY=(taskset -c 0)
-    ;;
-  *)
-    echo "MEASUREMENT.AFFINITY_MISS: unsupported platform $(uname); RFC-0009 limits to darwin/linux" >&2
-    exit 2
-    ;;
-esac
+read -ra AFFINITY <<< "$(resolve_affinity)"
 
 # -- locate the SP1 prover binary ---------------------------------------------
 
@@ -132,15 +106,11 @@ set -e
 # Re-emit the prover log to *our* stdout — the harness captures this.
 cat "${LOG_BUFFER}"
 
-# Grammar enforcement (RFC-0007 §"Stdout"). Both lines must be present in the
-# prover's log; if upstream doesn't emit them, the wrapper does not fabricate
-# substitute values — the absence is a `PROVER.STDOUT_GRAMMAR_VIOLATION` and
-# the run is marked invalid.
-if ! grep -qE '^CONSTRAINTS: [0-9]+$' "${LOG_BUFFER}" \
-   || ! grep -qE '^TRACE_ROWS:[[:space:]]+[0-9]+$' "${LOG_BUFFER}"; then
-  echo "PROVER.STDOUT_GRAMMAR_VIOLATION: missing CONSTRAINTS: / TRACE_ROWS: line(s) in prover output" >&2
-  exit 1
-fi
+# Grammar enforcement (RFC-0007 §"Stdout"). Exactly one `CONSTRAINTS:` line
+# and exactly one `TRACE_ROWS:` line, integers decimal non-negative. Zero
+# *or* more than one fails — `enforce_proverlog_grammar` exits 1 with
+# `PROVER.STDOUT_GRAMMAR_VIOLATION` on any deviation.
+enforce_proverlog_grammar "${LOG_BUFFER}"
 
 if [[ ${PROVER_RC} -ne 0 ]]; then
   echo "PROVER.WITNESS_REJECTED: sp1 prover exited ${PROVER_RC}" >&2

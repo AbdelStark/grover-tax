@@ -176,8 +176,11 @@ def test_run_sp1_writes_proof_atomically_via_mv(tmp_path: Path) -> None:
 
 
 def test_run_sp1_writes_constraints_and_trace_rows_check(tmp_path: Path) -> None:
-    """Static check: the wrapper enforces the M7 grammar."""
-    text = RUN_SP1.read_text(encoding="utf-8")
-    assert "CONSTRAINTS:" in text
-    assert "TRACE_ROWS:" in text
-    assert "PROVER.STDOUT_GRAMMAR_VIOLATION" in text
+    """Static check: the wrapper enforces the M7 grammar (via the sourced lib)."""
+    wrapper_text = RUN_SP1.read_text(encoding="utf-8")
+    lib_text = (repo_root() / "scripts" / "wrapper_lib.sh").read_text(encoding="utf-8")
+    combined = wrapper_text + "\n" + lib_text
+    assert "enforce_proverlog_grammar" in wrapper_text
+    assert "CONSTRAINTS:" in combined
+    assert "TRACE_ROWS:" in combined
+    assert "PROVER.STDOUT_GRAMMAR_VIOLATION" in combined
