@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = []
+
+# `stwo-side/` joins the workspace via issue #19 (RFC-0004 / RFC-0007). Until
+# that lands the workspace is intentionally empty: `cargo metadata` and
+# `cargo check --workspace` both succeed against zero members.
+#
+# SP1 lives at `sp1-side/` as a vendored git submodule (issue #5) and is *not*
+# part of this workspace — it is built via its own toolchain and patch set
+# (RFC-0006).
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.79"
+license = "MIT"
+repository = "https://github.com/AbdelStark/grover-tax"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
