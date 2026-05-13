@@ -1,0 +1,38 @@
+# Code owners for `grover-tax`.
+#
+# Routes review of methodology-critical paths to the maintainer set defined
+# in `docs/rfcs/RFC-0014-governance.md` §"CODEOWNERS". For `v0.1` the
+# maintainer set is one (`@AbdelStark`); adding maintainers requires an
+# RFC-0014 update.
+#
+# CODEOWNERS rules cascade in declaration order — the LAST matching pattern
+# wins. The catch-all on the first line therefore stands as the default; the
+# more specific paths below override it (which today happens to be a no-op,
+# but the explicit pinning is intentional: it makes the methodology
+# boundaries auditable from this file alone, and it keeps the routing
+# correct if additional maintainers join the catch-all later).
+
+*                              @AbdelStark
+
+# Workload pin: the contract that ties this benchmark to upstream at a
+# specific commit (RFC-0001).
+WORKLOAD.md                    @AbdelStark
+
+# Fixtures and the toolchain lock: the inputs the benchmark consumes
+# (RFC-0002, RFC-0012).
+fixtures/                      @AbdelStark
+versions.lock                  @AbdelStark
+
+# Specification corpus and RFCs: the methodology itself.
+docs/spec/                     @AbdelStark
+docs/spec/templates/           @AbdelStark
+docs/rfcs/                     @AbdelStark
+
+# SP1 patch surface: bounded by the line budget in RFC-0006.
+sp1-side-patches/              @AbdelStark
+
+# Reporting: `analyze.py` produces RESULTS.md (RFC-0011).
+analyze.py                     @AbdelStark
+
+# CI workflows: gate every other rule.
+.github/workflows/             @AbdelStark
