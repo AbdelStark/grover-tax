@@ -23,6 +23,7 @@
 // project can reference module shapes that exist on disk.
 
 pub mod limbs;
+pub mod gates;
 
 #[derive(Drop, Copy)]
 pub struct Gate {
