@@ -95,6 +95,13 @@ ignore = [
   "E501",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Test files are explicitly about asserting against expected literal values
+# (PLR2004), and the testing API conventionally exposes named constants by
+# attribute (B009). Test code is also free to access intentionally-private
+# sentinels on the modules it tests.
+"python/tests/**" = ["PLR2004", "B009", "PLR0913", "SLF001"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
