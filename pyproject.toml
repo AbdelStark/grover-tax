@@ -31,6 +31,8 @@ gen-fixtures = "grover_tax.gen_fixtures:main"
 analyze = "grover_tax.analyze:main"
 plot = "grover_tax.plot:main"
 sim-check = "grover_tax.sim_reference:main"
+check-results-md = "grover_tax.check_results_md:main"
+validate-schemas = "grover_tax.validate_schemas:main"
 
 [project.urls]
 Homepage = "https://github.com/AbdelStark/grover-tax"
