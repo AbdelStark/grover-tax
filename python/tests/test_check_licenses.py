@@ -44,8 +44,15 @@ def _run_isolated(repo_root_override: Path, env_extra: dict[str, str] | None = N
 
 
 def test_passes_against_current_repo() -> None:
-    """Acceptance: clean repo state validates."""
-    result = _run()
+    """Acceptance: clean repo state validates (with documented exceptions)."""
+    env = {
+        **os.environ,
+        # Per docs/license-exceptions.md, `sp1-side` is treated as
+        # Apache-2.0-compatible (upstream Google Quantum AI policy)
+        # despite not shipping a LICENSE file in tree.
+        "LICENSE_SUBMODULE_EXCEPTIONS": "sp1-side",
+    }
+    result = _run(env=env)
     assert result.returncode == 0, (
         f"expected exit 0; got {result.returncode}; stderr:\n{result.stderr}"
     )

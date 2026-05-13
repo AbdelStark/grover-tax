@@ -37,7 +37,26 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
 COMPATIBLE_DEFAULT='^(mit|apache-2\.0|apache 2\.0|bsd-2-clause|bsd-3-clause|isc|zlib|mpl-2\.0|unlicense|cc0-1\.0|cc0|0bsd|public domain|psf-2\.0|python software foundation license)$'
 COMPATIBLE_REGEX="${ALLOW_LICENSE_REGEX:-${COMPATIBLE_DEFAULT}}"
 
+# Space-separated list of submodule paths exempted from the LICENSE-file
+# requirement. Use for upstreams that don't ship a LICENSE file but are
+# known to fall in the compatible set (e.g. `tanujkhattar/zkp_ecc` is a
+# Google-Quantum-AI research artifact; the parent project's repo carries
+# the Apache-2.0 grant). Document every exception in
+# `docs/license-exceptions.md`.
+LICENSE_SUBMODULE_EXCEPTIONS="${LICENSE_SUBMODULE_EXCEPTIONS:-}"
+
 VIOLATIONS=()
+
+_is_exempt() {
+  local path="$1"
+  local exempt
+  for exempt in ${LICENSE_SUBMODULE_EXCEPTIONS}; do
+    if [[ "${exempt}" == "${path}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 # -- Helper: classify one licence string --------------------------------------
 
@@ -75,6 +94,10 @@ walk_submodules() {
   local mod_path
   while IFS= read -r mod_path; do
     [[ -z "${mod_path}" ]] && continue
+    if _is_exempt "${mod_path}"; then
+      echo "submodule ${mod_path}: exempt per LICENSE_SUBMODULE_EXCEPTIONS"
+      continue
+    fi
     local full="${REPO_ROOT}/${mod_path}"
     local found=""
     for candidate in LICENSE LICENSE.txt LICENSE.md COPYING COPYING.txt; do
@@ -99,14 +122,16 @@ walk_submodules() {
 
 _detect_licence_from_file() {
   local file="$1"
-  # Look at the first ~10 non-empty lines.
+  # Look at the first ~10 non-empty lines, flattening newlines to a single
+  # space so multi-line variants ("Apache License\nVersion 2.0") match the
+  # single-line regex.
   local head_text
-  head_text="$(head -n 20 "${file}" | tr -d '\r')"
+  head_text="$(head -n 20 "${file}" | tr -d '\r' | tr '\n' ' ')"
   # Common signatures.
   if grep -qiE 'mit license|permission is hereby granted, free of charge' <<<"${head_text}"; then
     echo MIT; return
   fi
-  if grep -qiE 'apache license, version 2\.0|apache-2\.0' <<<"${head_text}"; then
+  if grep -qiE 'apache license[[:space:]]*,?[[:space:]]*version[[:space:]]*2\.0|apache-2\.0' <<<"${head_text}"; then
     echo Apache-2.0; return
   fi
   if grep -qiE 'bsd 3-clause|redistribution and use in source and binary forms' <<<"${head_text}"; then

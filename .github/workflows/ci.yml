@@ -21,6 +21,11 @@ concurrency:
 
 env:
   UV_VERSION: "0.9.18"
+  # `sp1-side` (tanujkhattar/zkp_ecc) does not ship a LICENSE file in
+  # its tree; the redistribution is governed by Google Quantum AI's
+  # default Apache-2.0 policy. Documented in
+  # docs/license-exceptions.md.
+  LICENSE_SUBMODULE_EXCEPTIONS: "sp1-side"
 
 jobs:
   # -- lint-python -------------------------------------------------------------
