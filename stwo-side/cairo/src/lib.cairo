@@ -22,6 +22,8 @@
 // This skeleton compiles and exposes the signature so the rest of the
 // project can reference module shapes that exist on disk.
 
+pub mod limbs;
+
 #[derive(Drop, Copy)]
 pub struct Gate {
     pub opcode: u32,
