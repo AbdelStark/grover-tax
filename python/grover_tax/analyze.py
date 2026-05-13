@@ -52,10 +52,25 @@ __all__ = ["Stats", "main"]
 MIN_RUNS_M1 = 10
 MIN_RUNS_M5 = 40
 
+# RFC-0010 / RFC-0011 thresholds.
+STABILITY_THRESHOLD = 0.05  # |day1 - day2| / day1
+RESIDUAL_CONCURRENCY_THRESHOLD = 1.10  # user_cpu / wall_clock
+HIGH_DISCARD_THRESHOLD = 0.30  # n_discarded / (n_valid + n_discarded)
+HIGH_VARIANCE_THRESHOLD = 0.10  # iqr / median
+
 _log = gt_logging.get_logger("grover_tax.analyze")
 _CONSTRAINTS_RE = re.compile(r"^CONSTRAINTS:\s*(\d+)$", re.MULTILINE)
 _TRACE_ROWS_RE = re.compile(r"^TRACE_ROWS:\s*(\d+)$", re.MULTILINE)
 _TIMING_FILE_RE = re.compile(r"^(sp1|stwo)_v0\.1_(.+)\.timing\.json$")
+_VERIFY_FILE_RE = re.compile(r"^(sp1|stwo)_v0\.1_(.+)\.verify\.json$")
+_TIME_FILE_RE = re.compile(r"^(sp1|stwo)_v0\.1_(.+)\.time\.txt$")
+_GNU_TIME_USER_RE = re.compile(r"User time \(seconds\):\s*([\d.]+)")
+# `gnu-time -v` prints `Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.68`
+# — the format description embeds extra colons, so parse line-wise instead
+# of with a single all-in-one regex.
+_GNU_TIME_ELAPSED_LINE = "Elapsed (wall clock)"
+_HMS_PARTS = 3
+_MS_PARTS = 2
 
 
 @dataclass(frozen=True)
@@ -106,49 +121,51 @@ def main(argv: list[str] | None = None) -> int:
 # -- ingestion --------------------------------------------------------------
 
 
-def _build_context(rdir: Path) -> dict[str, Any]:  # noqa: PLR0912 - end-to-end ingestion has many cases
+def _build_context(rdir: Path) -> dict[str, Any]:
     """Walk results_dir and assemble the Jinja2 render context."""
-    timings: dict[str, list[tuple[str, list[float]]]] = {"sp1": [], "stwo": []}
-    verify_timings: dict[str, list[tuple[str, list[float]]]] = {"sp1": [], "stwo": []}
     if not rdir.is_dir():
         raise ReportError(
             ReportSubcode.MISSING_ARTIFACT, f"results dir {rdir} does not exist"
         )
 
-    for f in sorted(rdir.glob("*.timing.json")):
-        m = _TIMING_FILE_RE.match(f.name)
-        if m is None:
-            continue
-        prover, run_id = m.group(1), m.group(2)
-        data = json.loads(f.read_text(encoding="utf-8"))
-        timings[prover].append((run_id, list(data.get("results", [{}])[0].get("times", []))))
+    day1_dir = rdir / "day1"
+    day2_dir = rdir / "day2"
+    has_day12 = day1_dir.is_dir() and day2_dir.is_dir()
 
-    for f in sorted(rdir.glob("*.verify.json")):
-        m = re.match(r"^(sp1|stwo)_v0\.1_(.+)\.verify\.json$", f.name)
-        if m is None:
-            continue
-        prover, run_id = m.group(1), m.group(2)
-        data = json.loads(f.read_text(encoding="utf-8"))
-        verify_timings[prover].append(
-            (run_id, list(data.get("results", [{}])[0].get("times", [])))
-        )
+    if has_day12:
+        timings_d1, verify_d1, gnu_d1 = _scan_series(day1_dir)
+        timings_d2, verify_d2, gnu_d2 = _scan_series(day2_dir)
+        timings = {p: timings_d1[p] + timings_d2[p] for p in ("sp1", "stwo")}
+        verify_timings = {p: verify_d1[p] + verify_d2[p] for p in ("sp1", "stwo")}
+        gnu_times = {p: gnu_d1[p] + gnu_d2[p] for p in ("sp1", "stwo")}
+        m1_day1 = _m1_stats(timings_d1)
+        m1_day2 = _m1_stats(timings_d2)
+    else:
+        timings, verify_timings, gnu_times = _scan_series(rdir)
+        m1_day1 = None
+        m1_day2 = None
 
     discards = _load_discards(rdir.parent / discards_log_path().name)
 
-    # Apply D-INV-3 unconditional first-run discard at the per-series level.
-    m1: dict[str, Stats] = {}
-    for prover, runs in timings.items():
-        all_samples: list[float] = []
-        for _, samples in runs:
-            # Drop the first sample of each series as cold_cache (D-INV-3).
-            all_samples.extend(samples[1:] if samples else [])
-        n_discarded = sum(1 for _, s in runs if s)  # one cold_cache per series
-        m1[prover] = _stats(all_samples, n_discarded=n_discarded)
-
+    m1 = _m1_stats(timings)
     m5: dict[str, Stats] = {}
     for prover, runs in verify_timings.items():
         all_samples = [t for _, samples in runs for t in samples]
         m5[prover] = _stats(all_samples, n_discarded=0)
+
+    # Fold scripted discards into the M1 stats so the discard-rate flag sees
+    # them (D-INV-3 cold_cache plus any reasons in `discards.log`).
+    m1_with_log_discards: dict[str, Stats] = {}
+    for prover, s in m1.items():
+        extra = sum(1 for d in discards if d.get("prover") == prover)
+        if extra:
+            m1_with_log_discards[prover] = Stats(
+                s.median, s.mean, s.stddev, s.iqr, s.min, s.max, s.n_valid,
+                s.n_discarded + extra,
+            )
+        else:
+            m1_with_log_discards[prover] = s
+    m1 = m1_with_log_discards
 
     # Insufficient-samples gate.
     for prover, s in m1.items():
@@ -171,7 +188,97 @@ def _build_context(rdir: Path) -> dict[str, Any]:  # noqa: PLR0912 - end-to-end 
     if not has_real_data:
         return _stub_context(discards)
 
-    return _real_context(m1, m5, discards)
+    return _real_context(m1, m5, gnu_times, m1_day1, m1_day2, discards)
+
+
+def _scan_series(
+    dir_: Path,
+) -> tuple[
+    dict[str, list[tuple[str, list[float]]]],
+    dict[str, list[tuple[str, list[float]]]],
+    dict[str, list[tuple[float, float]]],
+]:
+    """Walk one directory; return per-prover timings + verify + gnu-time pairs."""
+    timings: dict[str, list[tuple[str, list[float]]]] = {"sp1": [], "stwo": []}
+    verify: dict[str, list[tuple[str, list[float]]]] = {"sp1": [], "stwo": []}
+    gnu: dict[str, list[tuple[float, float]]] = {"sp1": [], "stwo": []}
+
+    for f in sorted(dir_.glob("*.timing.json")):
+        m = _TIMING_FILE_RE.match(f.name)
+        if m is None:
+            continue
+        prover = m.group(1)
+        data = json.loads(f.read_text(encoding="utf-8"))
+        timings[prover].append(
+            (m.group(2), list(data.get("results", [{}])[0].get("times", [])))
+        )
+
+    for f in sorted(dir_.glob("*.verify.json")):
+        m = _VERIFY_FILE_RE.match(f.name)
+        if m is None:
+            continue
+        prover = m.group(1)
+        data = json.loads(f.read_text(encoding="utf-8"))
+        verify[prover].append(
+            (m.group(2), list(data.get("results", [{}])[0].get("times", [])))
+        )
+
+    for f in sorted(dir_.glob("*.time.txt")):
+        m = _TIME_FILE_RE.match(f.name)
+        if m is None:
+            continue
+        prover = m.group(1)
+        parsed = _parse_gnu_time(f.read_text(encoding="utf-8"))
+        if parsed is not None:
+            gnu[prover].append(parsed)
+
+    return timings, verify, gnu
+
+
+def _m1_stats(
+    timings: dict[str, list[tuple[str, list[float]]]],
+) -> dict[str, Stats]:
+    """Apply D-INV-3 cold_cache discard and compute per-prover M1 stats."""
+    out: dict[str, Stats] = {}
+    for prover, runs in timings.items():
+        all_samples: list[float] = []
+        for _, samples in runs:
+            all_samples.extend(samples[1:] if samples else [])
+        n_discarded = sum(1 for _, s in runs if s)
+        out[prover] = _stats(all_samples, n_discarded=n_discarded)
+    return out
+
+
+def _parse_gnu_time(text: str) -> tuple[float, float] | None:
+    """Extract (user_cpu_seconds, wall_clock_seconds) from `gnu-time -v` output.
+
+    Wall-clock is reported as `h:mm:ss[.s]` or `m:ss[.s]` — split on `:` and
+    pad missing leading components with zero.
+    """
+    u = _GNU_TIME_USER_RE.search(text)
+    if u is None:
+        return None
+    elapsed_token: str | None = None
+    for line in text.splitlines():
+        if _GNU_TIME_ELAPSED_LINE in line:
+            elapsed_token = line.rsplit(maxsplit=1)[-1]
+            break
+    if elapsed_token is None:
+        return None
+    parts = elapsed_token.split(":")
+    # gnu-time emits `h:mm:ss[.s]` (3 parts) or `m:ss[.s]` (2 parts).
+    if len(parts) == _HMS_PARTS:
+        h, m, s = parts
+    elif len(parts) == _MS_PARTS:
+        h, m, s = "0", parts[0], parts[1]
+    else:
+        return None
+    try:
+        user_cpu = float(u.group(1))
+        wall_clock = int(h) * 3600 + int(m) * 60 + float(s)
+    except ValueError:
+        return None
+    return (user_cpu, wall_clock)
 
 
 def _stats(samples: list[float], *, n_discarded: int) -> Stats:
@@ -260,15 +367,22 @@ def _stub_context(discards: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _real_context(
+def _real_context(  # noqa: PLR0913 - one render call assembles the entire context
     m1: dict[str, Stats],
     m5: dict[str, Stats],
+    gnu_times: dict[str, list[tuple[float, float]]],
+    m1_day1: dict[str, Stats] | None,
+    m1_day2: dict[str, Stats] | None,
     discards: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Render context for actual measured data."""
     ctx = _stub_context(discards)
+
+    flags, ctx_extras = _compute_flags(m1, gnu_times, m1_day1, m1_day2)
+    ctx.update(ctx_extras)
+    ctx["headline_status"] = " ".join(flags) if flags else ""
+
     ctx.update({
-        "headline_status": "",
         "n_sp1": m1["sp1"].n_valid, "n_stwo": m1["stwo"].n_valid,
         "m1_sp1_median": round(m1["sp1"].median, 3),
         "m1_stwo_median": round(m1["stwo"].median, 3),
@@ -286,6 +400,98 @@ def _real_context(
         "ratio_m5": round(_ratio(m5["sp1"].median, m5["stwo"].median), 2),
     })
     return ctx
+
+
+def _compute_flags(
+    m1: dict[str, Stats],
+    gnu_times: dict[str, list[tuple[float, float]]],
+    m1_day1: dict[str, Stats] | None,
+    m1_day2: dict[str, Stats] | None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Headline-flag detection per RFC-0010 / RFC-0011 / spec §08.
+
+    Order matches the headline-status convention (stability → variance →
+    discard → concurrency); flags are space-separated on the headline line.
+    """
+    flags: list[str] = []
+    extras: dict[str, Any] = {}
+
+    # 1. Day-1 / Day-2 stability gate (RFC-0010 §"Day-1 / Day-2 stability gate").
+    delta_sp1 = 0.0
+    delta_stwo = 0.0
+    if m1_day1 is not None and m1_day2 is not None:
+        delta_sp1 = _delta(m1_day1["sp1"].median, m1_day2["sp1"].median)
+        delta_stwo = _delta(m1_day1["stwo"].median, m1_day2["stwo"].median)
+        extras["day1_median_sp1"] = round(m1_day1["sp1"].median, 3)
+        extras["day1_median_stwo"] = round(m1_day1["stwo"].median, 3)
+        extras["day2_median_sp1"] = round(m1_day2["sp1"].median, 3)
+        extras["day2_median_stwo"] = round(m1_day2["stwo"].median, 3)
+        extras["day1_day2_delta_sp1"] = round(delta_sp1 * 100, 2)
+        extras["day1_day2_delta_stwo"] = round(delta_stwo * 100, 2)
+        breach = delta_sp1 > STABILITY_THRESHOLD or delta_stwo > STABILITY_THRESHOLD
+        if breach:
+            flags.append("[STABILITY BREACH]")
+            worst = max(delta_sp1, delta_stwo)
+            extras["stability_breach"] = True
+            extras["stability_breach_explanation"] = (
+                f"M1 median moved by {worst * 100:.2f}% between day-1 and day-2 "
+                f"(threshold {STABILITY_THRESHOLD * 100:.0f}%); see RFC-0010."
+            )
+
+    # 2. IQR / median variance (spec §08).
+    high_var_sp1 = m1["sp1"].median > 0 and m1["sp1"].iqr / m1["sp1"].median > HIGH_VARIANCE_THRESHOLD
+    high_var_stwo = m1["stwo"].median > 0 and m1["stwo"].iqr / m1["stwo"].median > HIGH_VARIANCE_THRESHOLD
+    if high_var_sp1 or high_var_stwo:
+        flags.append("[HIGH VARIANCE]")
+
+    # 3. Discard-rate cap (RFC-0010 §"Discard rate cap").
+    rate_sp1 = _discard_rate(m1["sp1"])
+    rate_stwo = _discard_rate(m1["stwo"])
+    extras["discard_pct_sp1"] = round(rate_sp1 * 100, 2)
+    extras["discard_pct_stwo"] = round(rate_stwo * 100, 2)
+    if rate_sp1 > HIGH_DISCARD_THRESHOLD or rate_stwo > HIGH_DISCARD_THRESHOLD:
+        flags.append("[HIGH DISCARD]")
+
+    # 4. Residual concurrency (spec §08 / RFC-0011 §"Apples-to-apples").
+    uw_sp1 = _user_wall_ratio(gnu_times["sp1"])
+    uw_stwo = _user_wall_ratio(gnu_times["stwo"])
+    extras["user_wall_sp1"] = round(uw_sp1, 2)
+    extras["user_wall_stwo"] = round(uw_stwo, 2)
+    residual = uw_sp1 > RESIDUAL_CONCURRENCY_THRESHOLD or uw_stwo > RESIDUAL_CONCURRENCY_THRESHOLD
+    if residual:
+        flags.append("[RESIDUAL CONCURRENCY]")
+        worst_p, worst_r = ("SP1", uw_sp1) if uw_sp1 >= uw_stwo else ("Stwo", uw_stwo)
+        extras["residual_concurrency"] = True
+        extras["residual_concurrency_note"] = (
+            f"{worst_p} user-CPU / wall-clock = {worst_r:.2f}, exceeding the "
+            f"{RESIDUAL_CONCURRENCY_THRESHOLD:.2f} threshold; "
+            f"M1 wall-clock is inflated by background interleaving."
+        )
+
+    return flags, extras
+
+
+def _delta(a: float, b: float) -> float:
+    if a == 0:
+        return 0.0
+    return abs(a - b) / a
+
+
+def _discard_rate(s: Stats) -> float:
+    total = s.n_valid + s.n_discarded
+    if total == 0:
+        return 0.0
+    return s.n_discarded / total
+
+
+def _user_wall_ratio(samples: list[tuple[float, float]]) -> float:
+    """Median user-CPU / wall-clock ratio over a series."""
+    if not samples:
+        return 1.0
+    ratios = [u / w for u, w in samples if w > 0]
+    if not ratios:
+        return 1.0
+    return statistics.median(ratios)
 
 
 def _render(context: dict[str, Any]) -> str:
