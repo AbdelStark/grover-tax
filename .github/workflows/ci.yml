@@ -246,3 +246,54 @@ jobs:
               exit "$rc"
             fi
           fi
+
+  # -- cairo-test --------------------------------------------------------------
+  cairo-test:
+    name: cairo-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install scarb
+        # Pinned via the upstream installer's `-v` flag once `versions.lock`
+        # locks the scarb version (#7). Today we take latest stable.
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://docs.swmansion.com/scarb/install.sh | sh -s --
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+      - name: scarb build
+        run: scarb --manifest-path stwo-side/cairo/Scarb.toml build
+      - name: scarb cairo-test
+        run: scarb --manifest-path stwo-side/cairo/Scarb.toml cairo-test
+
+  # -- rust-test ---------------------------------------------------------------
+  rust-test:
+    name: rust-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: cargo build --release -p stwo-side
+        run: cargo build --release -p stwo-side
+      - name: cargo test --release -p stwo-side
+        run: cargo test --release -p stwo-side
+      - name: Wrapper exit-code matrix via pytest
+        # The wrapper-symmetry tests (test_wrapper_symmetry, test_sp1_wrappers,
+        # test_stwo_wrappers, test_wrapper_lib) exercise the RFC-0007 contract
+        # without needing the real prover binaries — uses bash stubs in tmp_path.
+        run: |
+          uv pip install --system -e ".[dev]" || python3 -m pip install pytest jsonschema jinja2 coincurve
+          python3 -m pytest python/tests/test_wrapper_symmetry.py \
+                            python/tests/test_sp1_wrappers.py \
+                            python/tests/test_stwo_wrappers.py \
+                            python/tests/test_wrapper_lib.py \
+                            -q
