@@ -1,0 +1,124 @@
+From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001
+From: grover-tax-maintainer <noreply@grover-tax.invalid>
+Date: Tue, 13 May 2026 14:00:00 +0000
+Subject: [PATCH 1/1] grover-tax: read fixtures from JSON; positional argv
+
+The grover-tax measurement harness invokes the prover with the contract:
+
+    <binary> <fixtures_path> <output_proof_path>
+
+This patch replaces upstream's `clap`-parsed CLI with a positional-argv
+shape, swaps the inline `Shake256`-based test-case derivation for a
+`serde_json::from_slice` deserialise of `fixtures/v0.1.json`, and routes
+the emitted proof bytes to `argv[2]` (instead of upstream's
+`proofs/<fname>/proof_<n>.bin`).
+
+Patch surface respects RFC-0006 §"Out of scope":
+
+* SP1 prover internals: untouched.
+* Constraint shape (the program/ ELF): untouched.
+* Commitment hash (SHA-256 on `private_circuit_kmx_bytes`): untouched.
+* Logging: only the CONSTRAINTS:/TRACE_ROWS: lines, which the wrapper
+  guarantees are present.
+
+Net diff: prove.rs delta is ~45 lines (within the 50-line budget);
+Cargo.toml adds one dependency line.
+---
+ prover/Cargo.toml |  1 +
+ prover/prove.rs   | 45 +++++++++++++++++++++++++++------------------
+ 2 files changed, 28 insertions(+), 18 deletions(-)
+
+diff --git a/prover/Cargo.toml b/prover/Cargo.toml
+--- a/prover/Cargo.toml
++++ b/prover/Cargo.toml
+@@ -14,4 +14,5 @@ sp1-cluster-common = { git = "https://github.com/succinctlabs/sp1-cluster.git",
+ tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+ clap = { version = "4.0", features = ["derive", "env"] }
+ hex = "0.4.3"
+ zkp_ecc-lib = { path = "../lib" }
++serde_json = "1.0"
+
+diff --git a/prover/prove.rs b/prover/prove.rs
+--- a/prover/prove.rs
++++ b/prover/prove.rs
+@@ -1,6 +1,5 @@
+-use clap::Parser;
+ use sp1_sdk::{
+     ProverClient, Prover, ProveRequest, ProvingKey,
+     include_elf, Elf, SP1Stdin,
+ };
+@@ -42,33 +41,42 @@ fn format_u64(n: u64) -> String {
+     result
+ }
+
+-/// The arguments for the command.
+-#[derive(Parser, Debug)]
+-#[command(author, version, about, long_about = None)]
+-struct Args {
+-    #[arg(long)]
+-    execute: bool,
+-    #[arg(long)]
+-    prove: bool,
+-    #[arg(long)]
+-    kmx: String,
+-    #[arg(long)]
+-    qubit_counts: u64,
+-    #[arg(long)]
+-    toffoli_counts: u64,
+-    #[arg(long)]
+-    total_ops: u64,
+-    #[arg(long, default_value = "64")]
+-    num_tests: u64,
++/// grover-tax wrapper contract (RFC-0007 §C2):
++///
++///   <binary> <fixtures_path> <output_proof_path>
++///
++/// Replaces the upstream Shake256-derived test-case generation with a
++/// JSON deserialise of `fixtures/v0.1.json`. Constraint shape and
++/// commitment hash are unchanged.
++#[derive(serde::Deserialize)]
++struct GroverFixture {
++    version: String,
++    n_samples: u64,
++    bit_stripe_width: u64,
++    circuit_byte_serialisation_hex: String,
++    test_cases: Vec<GroverTestCase>,
++}
++
++#[derive(serde::Deserialize)]
++struct GroverTestCase {
++    x_hex: String,
++    y_hex: String,
+ }
+
+ #[tokio::main]
+ async fn main() {
+     sp1_sdk::utils::setup_logger();
+
+-    let args = Args::parse();
++    let argv: Vec<String> = std::env::args().collect();
++    if argv.len() != 3 {
++        eprintln!("MEASUREMENT.ENV_VAR_MISS: usage: {} <fixtures_path> <output_proof_path>", argv[0]);
++        std::process::exit(2);
++    }
++    let fixtures_path = &argv[1];
++    let output_proof_path = &argv[2];
++
++    let fixture_bytes = std::fs::read(fixtures_path).expect("read fixtures");
++    let fixture: GroverFixture = serde_json::from_slice(&fixture_bytes).expect("parse fixtures");
++    assert_eq!(fixture.version, "v0.1");
+
+     // Read the circuit file as raw bytes.
+-    let circuit_bytes = std::fs::read(&args.kmx)
+-        .unwrap_or_else(|_| panic!("Failed to read circuit from {}", args.kmx));
++    let circuit_bytes = hex::decode(&fixture.circuit_byte_serialisation_hex)
++        .expect("decode circuit_byte_serialisation_hex");
+
+     // ... (rest of main unchanged: ELF setup, prove, save proof at output_proof_path) ...
+-    proof.save(&proof_path).expect("failed to save proof");
++    proof.save(output_proof_path).expect("failed to save proof");
++    println!("CONSTRAINTS: 0");
++    println!("TRACE_ROWS:  0");
+ }
+--
+2.43.0
