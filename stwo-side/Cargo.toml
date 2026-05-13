@@ -1,0 +1,41 @@
+[package]
+name = "stwo-side"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Stwo prover and verifier shims for grover-tax v0.1."
+repository = "https://github.com/AbdelStark/grover-tax"
+publish = false
+
+# Two thin binaries per RFC-0007 §"`bin/run_<prover>.sh`" + the Stwo verifier
+# contract. Keep them minimal: positional argv, no CLI parser, no shell-side
+# parallelism. The wrappers in `bin/run_stwo.sh` / `bin/verify_stwo.sh` are
+# the operator-facing surface; these binaries are the strict argv contract
+# they invoke.
+
+[[bin]]
+name = "stwo_prove"
+path = "src/bin/prover_main.rs"
+
+[[bin]]
+name = "stwo_verify"
+path = "src/bin/verifier_main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Stwo dependency: deferred to `versions.lock` once #5 (submodule pin) and
+# #7 (lock commit on the reference rig) land. Today's binaries are stubs
+# that read the fixture / proof and exit with the contractual codes; the
+# real `stwo_prover` integration replaces the body of `run_prover` /
+# `run_verifier` in a follow-up that bumps this dependency block to:
+#
+#   stwo-prover = { git = "https://github.com/starkware-libs/stwo", rev = "<sha from versions.lock>" }
+#
+# The shims today satisfy the RFC-0007 contract (argv shape, exit codes,
+# CONSTRAINTS / TRACE_ROWS grammar lines) so the wrapper + measurement
+# harness can be exercised end-to-end against synthetic data.
+
+[lints]
+workspace = true

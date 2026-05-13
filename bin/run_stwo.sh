@@ -70,7 +70,11 @@ read -ra AFFINITY <<< "$(resolve_affinity)"
 
 # Per RFC-0004 the Stwo prover lives at `stwo-side/target/release/stwo_prove`.
 # `STWO_BINARY` overrides for development.
-STWO_BINARY_DEFAULT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/stwo-side/target/release/stwo_prove"
+REPO_ROOT_FOR_BIN="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# Cargo workspaces emit binaries at `<workspace-root>/target/release/`, not at
+# `<workspace-root>/<member>/target/release/`. stwo-side joined the workspace
+# under issue #19, so the resolved binary lives at the workspace target dir.
+STWO_BINARY_DEFAULT="${REPO_ROOT_FOR_BIN}/target/release/stwo_prove"
 STWO_BINARY="${STWO_BINARY:-${STWO_BINARY_DEFAULT}}"
 
 if [[ ! -x "${STWO_BINARY}" ]]; then

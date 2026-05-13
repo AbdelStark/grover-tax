@@ -1,10 +1,11 @@
 [workspace]
 resolver = "2"
-members = []
+members = ["stwo-side"]
 
-# `stwo-side/` joins the workspace via issue #19 (RFC-0004 / RFC-0007). Until
-# that lands the workspace is intentionally empty: `cargo metadata` and
-# `cargo check --workspace` both succeed against zero members.
+# `stwo-side/` joined the workspace under issue #19 (RFC-0004 / RFC-0007).
+# Its two binaries (`stwo_prove`, `stwo_verify`) honour the prover-wrapper
+# argv contract from RFC-0007; the Cairo source lives at `stwo-side/cairo/`
+# and builds with `scarb build` against a pinned Cairo edition.
 #
 # SP1 lives at `sp1-side/` as a vendored git submodule (issue #5) and is *not*
 # part of this workspace — it is built via its own toolchain and patch set
@@ -18,3 +19,8 @@ repository = "https://github.com/AbdelStark/grover-tax"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Reserved for future tightening. Today we let the default lints apply so
+# the stub binaries land green; subsequent prover-side PRs that import
+# real Stwo can layer stricter rules if needed.
