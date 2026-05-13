@@ -49,7 +49,9 @@ if [[ ! -f "${FIXTURE_RELATIVE_PATH}" || ! -r "${FIXTURE_RELATIVE_PATH}" ]]; the
   exit 2
 fi
 
-STWO_VERIFIER_DEFAULT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/stwo-side/target/release/stwo_verify"
+REPO_ROOT_FOR_BIN="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# Workspace target dir, not the member-crate path.
+STWO_VERIFIER_DEFAULT="${REPO_ROOT_FOR_BIN}/target/release/stwo_verify"
 STWO_VERIFIER="${STWO_VERIFIER:-${STWO_VERIFIER_DEFAULT}}"
 
 if [[ ! -x "${STWO_VERIFIER}" ]]; then

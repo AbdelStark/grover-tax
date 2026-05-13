@@ -83,3 +83,6 @@ Thumbs.db
 .coverage
 .coverage.*
 .hypothesis/
+# Cairo / Scarb build artifacts under stwo-side/cairo/
+stwo-side/cairo/target/
+.hypothesis/

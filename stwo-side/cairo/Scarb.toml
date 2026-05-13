@@ -1,0 +1,30 @@
+[package]
+name = "grover_tax_circuit"
+version = "0.1.0"
+edition = "2024_07"
+description = "Cairo gate-execution circuit for grover-tax v0.1 (Stwo side)."
+license = "MIT"
+
+# Pure Cairo library — not a Starknet contract. Stwo consumes the compiled
+# sierra emitted by `scarb build` directly. No `[[target]]` block is needed
+# for the library form; the prover-side Rust shim drives compilation
+# through the `cairo-lang-compiler` crate at the pinned version.
+
+# Cairo source layout (RFC-0004):
+#
+#   src/lib.cairo              — entry point + public-input signature.
+#   src/limbs.cairo            — [u31; 9] limb arithmetic + get_bit/set_bit (#20).
+#   src/gates.cairo            — gate dispatcher + step() (#21).
+#   src/serialise.cairo        — canonical byte serialiser mirror (#22).
+#   src/commit.cairo           — in-circuit Blake2s commitment check (#23).
+#
+# Subsequent issues (#20..#24) fill these modules in. The skeleton here
+# lands the entry-point signature so `scarb build` succeeds against the
+# stub body — i.e. the *project* compiles even before the real circuit
+# implementation arrives.
+
+[dependencies]
+# `stwo_prover` exposes the Cairo runtime primitives we need (Blake2s
+# built-in, range checks). Dependency pin lands with the lock file
+# (#7); the bare entry point in lib.cairo today does not need any
+# external Cairo dependency.
