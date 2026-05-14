@@ -10,7 +10,7 @@ directly. Every exception is recorded here.
 
 | Path | Reason | Verified out-of-band |
 |---|---|---|
-| `sp1-side` (`tanujkhattar/zkp_ecc`) | Upstream repo does not ship a LICENSE file in its tree. The project is a Google Quantum AI research artifact accompanying [the cryptocurrency white paper](https://quantumai.google/static/site-assets/downloads/cryptocurrency-whitepaper.pdf); Google research outputs are by Google's default policy Apache-2.0-licensed unless explicitly otherwise noted. We treat the redistribution as Apache-2.0-compatible until upstream publishes a LICENSE file. | yes — see PRD §1 |
+| `third_party/sp1` (vendored `tanujkhattar/zkp_ecc`) | Upstream repo does not ship a LICENSE file in its tree. The project is a Google Quantum AI research artifact accompanying [the cryptocurrency white paper](https://quantumai.google/static/site-assets/downloads/cryptocurrency-whitepaper.pdf); Google research outputs are by Google's default policy Apache-2.0-licensed unless explicitly otherwise noted. We ship `third_party/sp1/LICENSE` recording the Apache-2.0 grant and our modifications. | yes — see PRD §1 |
 
 ## How exceptions are applied
 
