@@ -73,15 +73,16 @@ read -ra AFFINITY <<< "$(resolve_affinity)"
 
 # -- locate the SP1 prover binary ---------------------------------------------
 
-# Per RFC-0006 the SP1 prover lives under `sp1-side/` as a git submodule with
-# the in-repo patch applied. The default candidate path is the binary the
-# patch produces; `SP1_BINARY` overrides for development convenience.
-SP1_BINARY_DEFAULT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/sp1-side/target/release/prove"
+# MVP: SP1 prover lives at `third_party/sp1/` (vendored copy of
+# tanujkhattar/zkp_ecc with the grover-tax integration applied directly).
+# The default candidate path is the binary `cargo build --release` produces;
+# `SP1_BINARY` overrides for development convenience.
+SP1_BINARY_DEFAULT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/third_party/sp1/target/release/prove"
 SP1_BINARY="${SP1_BINARY:-${SP1_BINARY_DEFAULT}}"
 
 if [[ ! -x "${SP1_BINARY}" ]]; then
   echo "BUILD.SP1_PATCH_FAIL: SP1 prover binary not built at ${SP1_BINARY}." >&2
-  echo "Run scripts/apply_sp1_patch.sh + cargo build --release in sp1-side/. (See RFC-0006.)" >&2
+  echo "Run \`cd third_party/sp1 && cargo +1.93.0 build --release\` first." >&2
   exit 3
 fi
 

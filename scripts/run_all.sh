@@ -109,21 +109,16 @@ else
 fi
 
 # 4. License check.
-LICENSE_SUBMODULE_EXCEPTIONS="${LICENSE_SUBMODULE_EXCEPTIONS:-sp1-side}" \
-  bash "${REPO_ROOT}/scripts/check_licenses.sh"
+bash "${REPO_ROOT}/scripts/check_licenses.sh"
 
-# 5. SP1 patch + build.
+# 5. Build both prover sides.
 if [[ "${SKIP_BUILD}" != "1" ]]; then
-  if [[ -x "${REPO_ROOT}/scripts/apply_sp1_patch.sh" ]]; then
-    bash "${REPO_ROOT}/scripts/apply_sp1_patch.sh"
-  else
-    echo "run_all.sh: scripts/apply_sp1_patch.sh not yet on disk (#26 pending); skipping"
-  fi
-  # Build stwo-side via the workspace.
-  (cd "${REPO_ROOT}" && cargo build --release -p stwo-side)
-  # SP1 side builds inside sp1-side/ if it has its own Cargo.toml.
-  if [[ -f "${REPO_ROOT}/sp1-side/Cargo.toml" ]]; then
-    (cd "${REPO_ROOT}/sp1-side" && cargo build --release || true)
+  # Stwo-side uses nightly-2025-07-14 (stwo's own pinned toolchain).
+  (cd "${REPO_ROOT}" && cargo +nightly-2025-07-14 build --release -p stwo-side)
+  # SP1 prover lives at third_party/sp1/ as a vendored copy with its
+  # own rust-toolchain (1.93.0).
+  if [[ -f "${REPO_ROOT}/third_party/sp1/Cargo.toml" ]]; then
+    (cd "${REPO_ROOT}/third_party/sp1" && cargo build --release)
   fi
 fi
 

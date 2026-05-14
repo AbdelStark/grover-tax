@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "program",
+    "prover",
+    "verifier",
+]
+resolver = "2"

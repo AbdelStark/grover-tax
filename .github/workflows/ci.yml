@@ -21,11 +21,9 @@ concurrency:
 
 env:
   UV_VERSION: "0.9.18"
-  # `sp1-side` (tanujkhattar/zkp_ecc) does not ship a LICENSE file in
-  # its tree; the redistribution is governed by Google Quantum AI's
-  # default Apache-2.0 policy. Documented in
-  # docs/license-exceptions.md.
-  LICENSE_SUBMODULE_EXCEPTIONS: "sp1-side"
+  # SP1 prover (tanujkhattar/zkp_ecc) is vendored under third_party/sp1
+  # (no longer a submodule). Its licensing is governed by Google Quantum
+  # AI's default Apache-2.0 policy; documented in docs/license-exceptions.md.
 
 jobs:
   # -- lint-python -------------------------------------------------------------
@@ -313,41 +311,6 @@ jobs:
           mv ./actionlint /usr/local/bin/actionlint
       - name: actionlint
         run: actionlint -color
-
-  # -- sp1-patch-budget --------------------------------------------------------
-  sp1-patch-budget:
-    name: sp1-patch-budget
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: RFC-0006 line-budget gate (50 .rs / 5 Cargo.toml)
-        run: bash scripts/check_sp1_patch_budget.sh
-
-  # -- sp1-patch-clean-apply ---------------------------------------------------
-  sp1-patch-clean-apply:
-    name: sp1-patch-clean-apply
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Apply SP1 patches against pinned sp1-side
-        # Soft-fail while the patch is still a structural sketch (#25's
-        # caveat — SHAs / context need a real `git format-patch -1`
-        # refresh on the reference rig). Becomes a hard gate the moment
-        # the patch is refreshed.
-        run: |
-          if bash scripts/apply_sp1_patch.sh; then
-            echo "apply_sp1_patch: clean apply"
-          else
-            rc=$?
-            if [[ $rc -eq 3 ]]; then
-              echo "::warning::SP1 patch needs a format-patch -1 refresh on the reference rig (#25 caveat); soft-fail"
-            else
-              echo "::error::apply_sp1_patch.sh exited $rc"
-              exit "$rc"
-            fi
-          fi
 
   # -- cairo-test --------------------------------------------------------------
   cairo-test:

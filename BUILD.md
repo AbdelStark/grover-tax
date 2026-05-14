@@ -32,15 +32,21 @@ boots.
 
 ```bash
 # 1. Submodules + Python deps.
-./scripts/init_submodules.sh
+./scripts/init_submodules.sh   # initialises the stwo submodule
 uv sync --frozen
 
-# 2. SP1 patch + build.
-./scripts/apply_sp1_patch.sh
-(cd sp1-side && cargo build --release)
+# 2. SP1 prover build.
+#    Source is vendored at third_party/sp1 (originally tanujkhattar/zkp_ecc).
+#    Requires Rust 1.93 + the SP1 toolchain (sp1up).
+curl -L https://sp1up.succinct.xyz | bash && ~/.sp1/bin/sp1up
+rustup install 1.93.0
+(cd third_party/sp1 && cargo +1.93.0 build --release)
 
-# 3. Stwo build (Rust workspace + Cairo).
-cargo build --release -p stwo-side
+# 3. Stwo build.
+#    Uses stwo as a git dependency pinned by the workspace lockfile.
+#    Requires Rust nightly-2025-07-14 (stwo's own pinned toolchain).
+rustup install nightly-2025-07-14
+cargo +nightly-2025-07-14 build --release -p stwo-side
 (cd stwo-side/cairo && scarb build)
 
 # 4. Fixture + validation.
