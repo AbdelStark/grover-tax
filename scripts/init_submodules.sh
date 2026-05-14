@@ -12,8 +12,10 @@
 #
 # Exit codes:
 #   0 — every submodule is initialised and at the recorded SHA.
-#   3 — `BUILD.SP1_PATCH_FAIL` (sp1-side) or `BUILD.STWO_SHA_DRIFT`
-#       (stwo) on any post-init mismatch.
+#   3 — `BUILD.STWO_SHA_DRIFT` (stwo) on any post-init mismatch.
+#
+# MVP note: SP1 source lives at `third_party/sp1/` as a vendored copy
+# (not a submodule). This script no longer initialises sp1-side.
 
 set -euo pipefail
 
@@ -61,6 +63,5 @@ expect_clean() {
 
 (
   cd "${REPO_ROOT}"
-  expect_clean sp1-side BUILD.SP1_PATCH_FAIL
   expect_clean stwo BUILD.STWO_SHA_DRIFT
 )

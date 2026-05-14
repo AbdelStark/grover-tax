@@ -119,9 +119,9 @@ uv_sha256() {
 }
 
 sp1_version() {
-  if [[ -r sp1-side/Cargo.lock ]]; then
+  if [[ -r third_party/sp1/Cargo.lock ]]; then
     awk '/^name = "sp1-/ {ok=1} ok && /^version =/ {gsub(/"/,"",$3); print $3; exit}' \
-      sp1-side/Cargo.lock
+      third_party/sp1/Cargo.lock
   else
     echo unknown
   fi

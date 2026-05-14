@@ -53,7 +53,7 @@ fi
 
 # -- locate the SP1 verifier binary -------------------------------------------
 
-SP1_VERIFIER_DEFAULT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/sp1-side/target/release/verifier"
+SP1_VERIFIER_DEFAULT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/third_party/sp1/target/release/verifier"
 SP1_VERIFIER="${SP1_VERIFIER:-${SP1_VERIFIER_DEFAULT}}"
 
 if [[ ! -x "${SP1_VERIFIER}" ]]; then

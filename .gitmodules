@@ -1,6 +1,3 @@
-[submodule "sp1-side"]
-	path = sp1-side
-	url = https://github.com/tanujkhattar/zkp_ecc.git
 [submodule "stwo"]
 	path = stwo
 	url = https://github.com/starkware-libs/stwo.git

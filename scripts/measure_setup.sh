@@ -53,7 +53,7 @@ else
 fi
 
 # SP1 setup binary path. Overridable for tests via SP1_SETUP_BINARY.
-SP1_SETUP_BINARY_DEFAULT="${REPO_ROOT}/sp1-side/target/release/setup"
+SP1_SETUP_BINARY_DEFAULT="${REPO_ROOT}/third_party/sp1/target/release/setup"
 SP1_SETUP_BINARY="${SP1_SETUP_BINARY:-${SP1_SETUP_BINARY_DEFAULT}}"
 
 # Output keys land under results/sp1_setup_keys/<run_id>/.
@@ -67,7 +67,7 @@ TIME_TXT="${KEYS_DIR}/setup.time.txt"
 
 if [[ ! -x "${SP1_SETUP_BINARY}" ]]; then
   echo "BUILD.SP1_PATCH_FAIL: SP1 setup binary not built at ${SP1_SETUP_BINARY}" >&2
-  echo "Run scripts/apply_sp1_patch.sh + cargo build --release --bin setup in sp1-side/" >&2
+  echo "Run \`cd third_party/sp1 && cargo +1.93.0 build --release\` first." >&2
   exit 3
 fi
 
