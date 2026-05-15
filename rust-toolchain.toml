@@ -1,0 +1,7 @@
+[toolchain]
+# Stwo (via git dep at cca98119 from stwo-side/Cargo.toml) uses Cairo M31
+# nightly intrinsics. The whole top-level workspace builds with this
+# toolchain. Sub-workspaces under `third_party/{stwo-cairo,sp1}` pin their
+# own toolchains via their respective `rust-toolchain*` files.
+channel = "nightly-2025-07-14"
+profile = "minimal"
