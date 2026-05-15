@@ -1,0 +1,2 @@
+{"ts":"2026-05-14T11:37:25Z","run_id":"r1","prover":"stwo","reason":"cold_cache","detail":"first-run cold-cache discard per D-INV-3","measurement_artifact":"results/stwo_v0.1_r1.timing.json"}
+{"ts":"2026-05-14T16:46:08Z","run_id":"r1","prover":"sp1","reason":"cold_cache","detail":"first-run cold-cache discard per D-INV-3","measurement_artifact":"results/sp1_v0.1_r1.timing.json"}
