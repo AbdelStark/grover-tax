@@ -357,14 +357,22 @@ jobs:
         run: cargo build --release -p stwo-side
       - name: cargo test --release -p stwo-side
         run: cargo test --release -p stwo-side
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: uv sync --frozen
+        run: uv sync --frozen
       - name: Wrapper exit-code matrix via pytest
         # The wrapper-symmetry tests (test_wrapper_symmetry, test_sp1_wrappers,
         # test_stwo_wrappers, test_wrapper_lib) exercise the RFC-0007 contract
         # without needing the real prover binaries — uses bash stubs in tmp_path.
+        # `uv run` reuses the project venv created by `uv sync`, side-stepping
+        # macOS's PEP 668 externally-managed-environment block on system Python.
         run: |
-          uv pip install --system -e ".[dev]" || python3 -m pip install pytest jsonschema jinja2 coincurve
-          python3 -m pytest python/tests/test_wrapper_symmetry.py \
-                            python/tests/test_sp1_wrappers.py \
-                            python/tests/test_stwo_wrappers.py \
-                            python/tests/test_wrapper_lib.py \
-                            -q
+          uv run pytest python/tests/test_wrapper_symmetry.py \
+                        python/tests/test_sp1_wrappers.py \
+                        python/tests/test_stwo_wrappers.py \
+                        python/tests/test_wrapper_lib.py \
+                        -q
