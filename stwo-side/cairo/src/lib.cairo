@@ -141,9 +141,20 @@ fn main(
 ///   * `circuit_bytes`: `Array<u8>` (the fixture's
 ///     `circuit_byte_serialisation_hex` decoded).
 ///   * `n`: `u64` — the loop iteration count (= fixture's `gate_count`).
+///   * `expected_commitment`: `u256` — the verifier-provided expected
+///     `Blake2s(circuit_bytes)` reduced mod p (= σ₀).
+///   * `expected_sigma`: `u256` — the verifier-provided expected σ_N.
 ///
-/// Returns `(commitment, sigma_n)`. cairo-vm wraps the return into the
-/// program-output area; stwo-cairo lifts both as public inputs.
+/// The function asserts that the computed `(commitment, sigma_n)` equals
+/// the provided expected values. The proof of "I ran this and the
+/// asserts didn't fire" is equivalent to "I performed the N mod-adds
+/// and arrived at (expected_commitment, expected_sigma)". This
+/// avoids returning large u128 values via the AP region — stwo-cairo's
+/// `--program_type executable` extract_public_segments path needs all
+/// AP slots to fit in u32.
+///
+/// Returns `()` so cairo-vm writes nothing to the output segment;
+/// public commitments are the input arguments themselves.
 #[executable]
 pub fn apples_to_apples_executable(
     circuit_bytes: Array<u8>, n: u64,

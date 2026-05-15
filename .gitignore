@@ -86,3 +86,6 @@ Thumbs.db
 # Cairo / Scarb build artifacts under stwo-side/cairo/
 stwo-side/cairo/target/
 .hypothesis/gce-headline-r1/
+third_party/stwo-cairo/stwo_cairo_prover/target/
+third_party/stwo-cairo/stwo_cairo_verifier/target/
+stwo-side/cairo/target/
