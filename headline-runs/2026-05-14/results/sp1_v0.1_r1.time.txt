@@ -1,0 +1,23 @@
+	Command being timed: "bash /home/abdel/grover-tax/bin/run_sp1.sh /home/abdel/grover-tax/fixtures/v0.1.json /home/abdel/grover-tax/results/sp1_v0.1_r1.proof.bin"
+	User time (seconds): 730.59
+	System time (seconds): 21.02
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 12:31.64
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 17929584
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 13398110
+	Voluntary context switches: 231329
+	Involuntary context switches: 252385
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 2520
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

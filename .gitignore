@@ -85,4 +85,4 @@ Thumbs.db
 .hypothesis/
 # Cairo / Scarb build artifacts under stwo-side/cairo/
 stwo-side/cairo/target/
-.hypothesis/
+.hypothesis/gce-headline-r1/

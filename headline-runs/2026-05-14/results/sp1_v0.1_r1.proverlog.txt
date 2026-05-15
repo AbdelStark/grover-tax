@@ -1,0 +1,5 @@
+[2m2026-05-14T13:55:13.701878Z[0m [32m INFO[0m initializing cpu prover
+[2m2026-05-14T13:58:23.915237Z[0m [32m INFO[0m starting proof generation [3mmode[0m[2m=[0mCompressed
+[2m2026-05-14T14:07:44.150254Z[0m [32m INFO[0m [1mprove[0m: close [3mtime.busy[0m[2m=[0m1.88ms [3mtime.idle[0m[2m=[0m560s [2m[3mmode[0m[2m=[0mCompressed[0m
+CONSTRAINTS: 1024
+TRACE_ROWS:  1024
