@@ -1,0 +1,3 @@
+CONSTRAINTS: 98
+TRACE_ROWS:  1024
+stwo_prove: log_n_rows=10 fib_len=100 n_samples=4
