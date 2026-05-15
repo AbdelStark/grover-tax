@@ -123,8 +123,8 @@ pub fn apples_to_apples(circuit_bytes: @Array<u8>, n: u64) -> (u256, u256) {
 }
 
 /// Skeleton main retained for backward compatibility with existing
-/// tests. Real execution goes through `apples_to_apples` driven by
-/// `stwo-cairo`.
+/// tests. Real execution goes through `apples_to_apples_executable`
+/// driven by `scarb execute` → `stwo-cairo`.
 fn main(
     public_test_cases: Array<TestCase>,
     public_h_c: u256,
@@ -133,6 +133,22 @@ fn main(
     let _ = public_test_cases.len();
     let _ = public_h_c;
     let _ = secret_c.len();
+}
+
+/// Cairo-vm-executable entry point for `scarb execute` + `stwo-cairo`.
+///
+/// Argument convention (passed via `--arguments-file` or `--arguments`):
+///   * `circuit_bytes`: `Array<u8>` (the fixture's
+///     `circuit_byte_serialisation_hex` decoded).
+///   * `n`: `u64` — the loop iteration count (= fixture's `gate_count`).
+///
+/// Returns `(commitment, sigma_n)`. cairo-vm wraps the return into the
+/// program-output area; stwo-cairo lifts both as public inputs.
+#[executable]
+pub fn apples_to_apples_executable(
+    circuit_bytes: Array<u8>, n: u64,
+) -> (u256, u256) {
+    apples_to_apples(@circuit_bytes, n)
 }
 
 #[cfg(test)]
