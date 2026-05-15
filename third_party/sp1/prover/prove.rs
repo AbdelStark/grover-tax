@@ -107,9 +107,16 @@ async fn main() -> ExitCode {
 
     let client = ProverClient::from_env().await;
 
+    // The zkVM program performs `gate_count` modular additions over
+    // secp256k1's prime. `gate_count` is the v0.1 workload knob
+    // (WORKLOAD.md, 1024). `fixture.n_samples` is unused on the SP1 side
+    // for the A2 statement (RFC-0005 commitment is computed from
+    // `circuit_bytes` and the loop count is `gate_count`).
+    let _ = fixture.n_samples;
+
     let mut stdin = SP1Stdin::new();
     stdin.write_vec(circuit_bytes);
-    stdin.write(&fixture.n_samples);
+    stdin.write(&gate_count);
 
     let pk = match client.setup(ZKP_ECC_ELF).await {
         Ok(p) => p,

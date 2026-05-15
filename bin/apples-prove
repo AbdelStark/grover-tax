@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+#
+# bin/apples-prove — grover-tax custom runner.
+#
+# Inspired by `starkware-libs/proving-utils`'s `stwo_run_and_prove`, this
+# tool orchestrates an end-to-end **Cairo 1 → Stwo Circle STARK** pipeline
+# for the apples-to-apples kernel:
+#
+#   1. Read the v0.1 fixture (`fixtures/v0.1.json`).
+#   2. Compute the seed σ₀ = Blake2s(circuit_bytes) mod p   (Stwo's
+#      RFC-0005 commitment hash) and the expected σ_N from the same
+#      mod-add-over-secp256k1 loop SP1 runs.
+#   3. Build a `SimpleBootloaderInput` JSON whose single task is our
+#      scarb-execute-produced `executable.json` (`type: Cairo1Executable`).
+#   4. Invoke proving-utils' `stwo-run-and-prove` binary with that input
+#      against `simple_bootloader_compiled.json`. The bootloader runs
+#      our Cairo 1 program as a task; stwo-cairo proves the bootloader's
+#      execution; the proof is verified inline.
+#
+# This is the documented and tested path for proving Cairo 1
+# `#[executable]` programs at the time of writing (May 2026). Direct
+# stwo-cairo `--program_type executable` proving is also implemented in
+# `third_party/stwo-cairo/` after a small `extract_public_segments`
+# patch, but the bootloader path is more battle-tested.
+#
+# Usage:
+#   bin/apples-prove [--fixture fixtures/v0.1.json] \
+#                    [--proof-out results/apples.proof.bin] \
+#                    [--proof-format cairo-serde|json|binary]
+#
+# Exit codes:
+#   0  proved + verified
+#   1  prove/verify failed
+#   2  precondition violated (missing tool, bad fixture)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
+
+FIXTURE="${REPO_ROOT}/fixtures/v0.1.json"
+PROOF_OUT="${REPO_ROOT}/results/apples.proof.bin"
+PROOF_FORMAT="cairo-serde"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --fixture) FIXTURE="$2"; shift 2;;
+    --proof-out) PROOF_OUT="$2"; shift 2;;
+    --proof-format) PROOF_FORMAT="$2"; shift 2;;
+    -h|--help)
+      sed -n '2,40p' "$0"; exit 0;;
+    *) echo "unknown arg: $1" >&2; exit 2;;
+  esac
+done
+
+# -- preconditions ---------------------------------------------------------
+
+PROVING_UTILS_BIN="${REPO_ROOT}/third_party/proving-utils/target/release/stwo-run-and-prove"
+EXECUTABLE_JSON="${REPO_ROOT}/stwo-side/cairo/target/dev/grover_tax_executable.executable.json"
+SIMPLE_BOOTLOADER="${REPO_ROOT}/third_party/proving-utils/crates/cairo-program-runner-lib/resources/compiled_programs/bootloaders/simple_bootloader_compiled.json"
+
+for f in "$PROVING_UTILS_BIN" "$EXECUTABLE_JSON" "$SIMPLE_BOOTLOADER" "$FIXTURE"; do
+  if [[ ! -f "$f" ]]; then
+    echo "MEASUREMENT.ENV_VAR_MISS: missing prerequisite: $f" >&2
+    if [[ "$f" == "$PROVING_UTILS_BIN" ]]; then
+      echo "  build it via: (cd third_party/proving-utils && cargo +nightly-2025-07-14 build --release -p stwo-run-and-prove)" >&2
+    fi
+    if [[ "$f" == "$EXECUTABLE_JSON" ]]; then
+      echo "  build it via: scarb --manifest-path stwo-side/cairo/Scarb.toml build" >&2
+    fi
+    exit 2
+  fi
+done
+
+# -- build the SimpleBootloaderInput JSON ---------------------------------
+
+BL_INPUT="$(mktemp)"
+trap 'rm -f "$BL_INPUT"' EXIT
+
+python3 - <<PYEOF > "$BL_INPUT"
+import json, hashlib, struct, sys
+
+with open("${FIXTURE}") as f:
+    fix = json.load(f)
+cb = bytes.fromhex(fix["circuit_byte_serialisation_hex"])
+n = struct.unpack("<I", cb[4:8])[0]
+P = 2**256 - 2**32 - 977
+seed = int.from_bytes(hashlib.blake2s(cb).digest(), "big") % P
+sigma = seed
+for i in range(n):
+    sigma = (sigma + (i + 1)) % P
+
+inner = [
+    seed & ((1 << 128) - 1),
+    seed >> 128,
+    n,
+    sigma & ((1 << 128) - 1),
+    sigma >> 128,
+]
+# Cairo signature is fn(input: Array<felt252>). Cairo Arrays serialize as
+# [len, val0, val1, ...] for scarb / stwo-cairo user_args.
+user_args = [len(inner), *inner]
+
+data = {
+    "fact_topologies_path": None,
+    "single_page": True,
+    "tasks": [
+        {
+            "type": "Cairo1Executable",
+            "program_hash_function": "Pedersen",
+            "path": "${EXECUTABLE_JSON}",
+            "user_args_list": user_args,
+        }
+    ],
+}
+print(json.dumps(data, indent=2), file=sys.stdout)
+print(f"# σ₀ low:  0x{seed & ((1<<128)-1):032x}", file=sys.stderr)
+print(f"# σ₀ high: 0x{seed >> 128:032x}", file=sys.stderr)
+print(f"# n:       {n}", file=sys.stderr)
+print(f"# σ_N low: 0x{sigma & ((1<<128)-1):032x}", file=sys.stderr)
+print(f"# σ_N hi:  0x{sigma >> 128:032x}", file=sys.stderr)
+PYEOF
+
+mkdir -p "$(dirname -- "$PROOF_OUT")"
+
+echo "apples-prove: orchestrating Cairo 1 → simple-bootloader → Stwo Circle STARK"
+echo "  fixture:     $FIXTURE"
+echo "  executable:  $EXECUTABLE_JSON"
+echo "  bootloader:  $SIMPLE_BOOTLOADER"
+echo "  proof out:   $PROOF_OUT  (format: $PROOF_FORMAT)"
+
+# -- run + prove + inline-verify -----------------------------------------
+
+"$PROVING_UTILS_BIN" \
+    --program "$SIMPLE_BOOTLOADER" \
+    --program_input "$BL_INPUT" \
+    --proof_path "$PROOF_OUT" \
+    --proof-format "$PROOF_FORMAT" \
+    --verify
+
+echo "apples-prove: ✅ Cairo 1 program proved + inline-verified end-to-end"
+echo "apples-prove: proof file: $(ls -la "$PROOF_OUT" | awk '{print $5, $NF}')"

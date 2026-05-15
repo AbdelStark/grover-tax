@@ -15,12 +15,31 @@
 //!       disagree with the fixture).
 //!   2 — `MEASUREMENT.*` (missing file, bad argv).
 
+use ruint::aliases::U256;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use sp1_sdk::{
     include_elf, Elf, HashableKey, Prover, ProverClient, ProvingKey,
     SP1ProofWithPublicValues,
 };
+
+/// secp256k1's prime: `p = 2^256 − 2^32 − 977`.
+const SECP256K1_P_HEX: &str =
+    "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F";
+
+/// Re-derive the expected final state σ_N independently of the prover.
+/// Mirrors the loop in `third_party/sp1/program/src/main.rs`.
+fn expected_sigma_n(commitment: &[u8; 32], n: u64) -> [u8; 32] {
+    let p: U256 = U256::from_str_radix(SECP256K1_P_HEX, 16).unwrap();
+    let mut state: U256 = U256::from_be_bytes::<32>(*commitment) % p;
+    let mut i: u64 = 0;
+    while i < n {
+        let step: U256 = U256::from(i + 1);
+        state = (state + step) % p;
+        i += 1;
+    }
+    state.to_be_bytes::<32>()
+}
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -28,7 +47,6 @@ const ZKP_ECC_ELF: Elf = include_elf!("zkp_ecc-program");
 
 #[derive(Deserialize)]
 struct Fixture {
-    n_samples: u64,
     circuit_byte_serialisation_hex: String,
     circuit_commitment_sha256_hex: String,
 }
@@ -113,11 +131,20 @@ async fn main() -> ExitCode {
         return ExitCode::from(1);
     }
 
-    // Cross-check public values vs the fixture.
+    // Recompute the loop count exactly as the prover did: the binary
+    // header is `[b"GTV1", gate_count: u32 LE, ...]`.
+    let gate_count: u64 = if circuit_bytes.len() >= 8 {
+        u32::from_le_bytes([
+            circuit_bytes[4], circuit_bytes[5], circuit_bytes[6], circuit_bytes[7],
+        ]) as u64
+    } else {
+        0
+    };
+
+    // Cross-check public values vs the fixture + re-derived σ_N.
     let committed_hash = proof.public_values.read::<[u8; 32]>();
-    let committed_n_samples = proof.public_values.read::<u64>();
-    let _gate_count = proof.public_values.read::<u64>();
-    let _state = proof.public_values.read::<u64>();
+    let committed_n = proof.public_values.read::<u64>();
+    let committed_sigma_n = proof.public_values.read::<[u8; 32]>();
 
     let fixture_commitment_bytes: [u8; 32] =
         match hex::decode(&fixture.circuit_commitment_sha256_hex) {
@@ -142,14 +169,20 @@ async fn main() -> ExitCode {
         );
         return ExitCode::from(1);
     }
-    if committed_n_samples != fixture.n_samples {
+    if committed_n != gate_count {
         eprintln!(
-            "PROVER.VERIFIER_REJECTED: committed n_samples ({committed_n_samples}) != fixture ({})",
-            fixture.n_samples
+            "PROVER.VERIFIER_REJECTED: committed n ({committed_n}) != fixture gate_count ({gate_count})"
+        );
+        return ExitCode::from(1);
+    }
+    let expected = expected_sigma_n(&committed_hash, committed_n);
+    if committed_sigma_n != expected {
+        eprintln!(
+            "PROVER.VERIFIER_REJECTED: committed σ_N does not match re-derived σ_N"
         );
         return ExitCode::from(1);
     }
 
-    println!("Proof verified successfully.");
+    println!("Proof verified; σ_N = 0x{}", hex::encode(committed_sigma_n));
     ExitCode::SUCCESS
 }
