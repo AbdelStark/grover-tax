@@ -6,8 +6,10 @@
 #
 #   bin/verify_stwo.sh <proof_path>
 #
-# Symmetric with `bin/verify_sp1.sh`. Reads `fixtures/v0.1.json` from a fixed
-# relative path (the cwd).
+# Symmetric with `bin/verify_sp1.sh`. Reads `fixtures/v0.1.json` from a
+# fixed relative path (the cwd) for the sanity check. v0.1 spec target:
+# verifies the apples-to-apples Cairo 1 → bootloader → stwo-cairo Circle
+# STARK proof produced by `bin/run_stwo.sh` / `bin/apples-prove`.
 #
 # Exit codes (per docs/spec/04-error-model.md):
 #   0 — proof valid against the fixture; stdout is empty
@@ -49,18 +51,18 @@ if [[ ! -f "${FIXTURE_RELATIVE_PATH}" || ! -r "${FIXTURE_RELATIVE_PATH}" ]]; the
   exit 2
 fi
 
-REPO_ROOT_FOR_BIN="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-# Workspace target dir, not the member-crate path.
-STWO_VERIFIER_DEFAULT="${REPO_ROOT_FOR_BIN}/target/release/stwo_verify"
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+STWO_VERIFIER_DEFAULT="${REPO_ROOT}/third_party/stwo-cairo/stwo_cairo_prover/target/release/verify"
 STWO_VERIFIER="${STWO_VERIFIER:-${STWO_VERIFIER_DEFAULT}}"
 
 if [[ ! -x "${STWO_VERIFIER}" ]]; then
-  echo "BUILD.STWO_SHA_DRIFT: Stwo verifier binary not built at ${STWO_VERIFIER}. (See RFC-0004.)" >&2
+  echo "BUILD.STWO_SHA_DRIFT: stwo-cairo verify binary missing at ${STWO_VERIFIER}." >&2
+  echo "Build via: (cd third_party/stwo-cairo/stwo_cairo_prover && cargo +nightly-2025-06-23 build --release --bin verify)" >&2
   exit 2
 fi
 
 set +e
-"${STWO_VERIFIER}" --fixtures "${FIXTURE_RELATIVE_PATH}" --proof "${PROOF_PATH}" >/dev/null 2>/tmp/verify_stwo.err.$$
+"${STWO_VERIFIER}" --proof_path "${PROOF_PATH}" >/dev/null 2>/tmp/verify_stwo.err.$$
 VERIFIER_RC=$?
 set -e
 
@@ -71,5 +73,5 @@ fi
 
 cat /tmp/verify_stwo.err.$$ >&2
 rm -f /tmp/verify_stwo.err.$$
-echo "PROVER.VERIFIER_REJECTED: stwo verifier exited ${VERIFIER_RC} on ${PROOF_PATH}" >&2
+echo "PROVER.VERIFIER_REJECTED: stwo-cairo verify exited ${VERIFIER_RC} on ${PROOF_PATH}" >&2
 exit 1
