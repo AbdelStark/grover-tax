@@ -89,3 +89,5 @@ stwo-side/cairo/target/
 third_party/stwo-cairo/stwo_cairo_prover/target/
 third_party/stwo-cairo/stwo_cairo_verifier/target/
 stwo-side/cairo/target/
+third_party/proving-utils/target/
+third_party/proving-utils/Cargo.lock

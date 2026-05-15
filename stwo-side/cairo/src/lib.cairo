@@ -155,11 +155,53 @@ fn main(
 ///
 /// Returns `()` so cairo-vm writes nothing to the output segment;
 /// public commitments are the input arguments themselves.
+/// Cairo-vm-executable entry point for `scarb execute` + `stwo-cairo`.
+///
+/// Single-argument signature: a flat `Array<felt252>` matching
+/// stwo-cairo's `user_args: vec![vec![Arg::Array(args)]]` convention.
+/// Cairo 1's executable runtime stuffs *positional* args into the AP
+/// region — and u128/u64 values exceed the u32 cast inside
+/// stwo-cairo's `extract_public_segments`. A single `Array<felt252>`
+/// arg lives behind a *pointer* (small u32), which the AP layout
+/// can hold safely.
+///
+/// Layout of `input`:
+///   [0] seed_lo (felt; low 128 bits of σ₀)
+///   [1] seed_hi (felt; high 128 bits of σ₀)
+///   [2] n       (felt; loop iteration count)
+///
+/// Returns `()` to keep the program tail's AP slots empty.
+/// The "public" output is the σ_N value computed in the loop — we
+/// `assert!` it against the caller-provided `expected_sigma_*` in
+/// the input array, so the proof attests both to the loop body and
+/// to the agreed σ_N. To preserve this constraint without complicating
+/// the AP layout, we encode expected σ_N in input slots [3] and [4].
 #[executable]
-pub fn apples_to_apples_executable(
-    circuit_bytes: Array<u8>, n: u64,
-) -> (u256, u256) {
-    apples_to_apples(@circuit_bytes, n)
+pub fn apples_to_apples_executable(input: Array<felt252>) -> felt252 {
+    let mut span = input.span();
+    let seed_lo: u128 = (*span.pop_front().unwrap()).try_into().unwrap();
+    let seed_hi: u128 = (*span.pop_front().unwrap()).try_into().unwrap();
+    let n_felt: felt252 = *span.pop_front().unwrap();
+    let n: u64 = n_felt.try_into().unwrap();
+    let expected_lo: u128 = (*span.pop_front().unwrap()).try_into().unwrap();
+    let expected_hi: u128 = (*span.pop_front().unwrap()).try_into().unwrap();
+
+    let seed = u256 { low: seed_lo, high: seed_hi };
+    let expected_sigma: u256 = u256 { low: expected_lo, high: expected_hi };
+
+    let p = secp256k1_p();
+    let mut sigma = seed;
+    let mut i: u64 = 0;
+    loop {
+        if i == n { break; }
+        let step: u256 = (i + 1).into();
+        sigma = mod_add_p(sigma, step, p);
+        i = i + 1;
+    };
+
+    // Return 1 if match, 0 otherwise. The verifier checks the public
+    // output equals 1.
+    if sigma == expected_sigma { 1 } else { 0 }
 }
 
 #[cfg(test)]

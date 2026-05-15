@@ -1835,6 +1835,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "grover-apples-runner"
+version = "1.2.2"
+dependencies = [
+ "anyhow",
+ "cairo-air",
+ "cairo-lang-executable",
+ "cairo-lang-runner",
+ "cairo-vm",
+ "clap",
+ "serde",
+ "serde_json",
+ "sonic-rs",
+ "starknet-ff",
+ "stwo",
+ "stwo-cairo-adapter",
+ "stwo-cairo-prover",
+ "stwo-cairo-serialize",
+ "stwo-cairo-utils",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
