@@ -40,7 +40,11 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
 
 FIXTURE="${REPO_ROOT}/fixtures/v0.1.json"
 PROOF_OUT="${REPO_ROOT}/results/apples.proof.bin"
-PROOF_FORMAT="cairo-serde"
+# The stwo-cairo `verify` binary reads CairoProofForRustVerifier from
+# JSON (sonic_rs::from_str). cairo-serde emits a hex felt array intended
+# for in-Cairo recursive verification, which the Rust verify binary
+# rejects. Default to JSON so the wrapper pair stays symmetric.
+PROOF_FORMAT="json"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

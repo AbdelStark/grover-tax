@@ -52,17 +52,23 @@ if [[ ! -f "${FIXTURE_RELATIVE_PATH}" || ! -r "${FIXTURE_RELATIVE_PATH}" ]]; the
 fi
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-STWO_VERIFIER_DEFAULT="${REPO_ROOT}/third_party/stwo-cairo/stwo_cairo_prover/target/release/verify"
+# `apples-verify` lives inside proving-utils' workspace so it shares the
+# crates.io `stwo-cairo-prover = "1.2.2"` dep used by `stwo-run-and-prove`
+# (the prover). The stand-alone `verify` binary in
+# `third_party/stwo-cairo/` is built against a different stwo revision and
+# rejects proving-utils-emitted proofs with "Proof of work verification
+# failed". See bin/apples-prove for the symmetric prover binary.
+STWO_VERIFIER_DEFAULT="${REPO_ROOT}/third_party/proving-utils/target/release/apples-verify"
 STWO_VERIFIER="${STWO_VERIFIER:-${STWO_VERIFIER_DEFAULT}}"
 
 if [[ ! -x "${STWO_VERIFIER}" ]]; then
-  echo "BUILD.STWO_SHA_DRIFT: stwo-cairo verify binary missing at ${STWO_VERIFIER}." >&2
-  echo "Build via: (cd third_party/stwo-cairo/stwo_cairo_prover && cargo +nightly-2025-06-23 build --release --bin verify)" >&2
+  echo "BUILD.STWO_SHA_DRIFT: stwo verifier binary missing at ${STWO_VERIFIER}." >&2
+  echo "Build via: (cd third_party/proving-utils && cargo +nightly-2025-07-14 build --release -p stwo-run-and-prove --bin apples-verify)" >&2
   exit 2
 fi
 
 set +e
-"${STWO_VERIFIER}" --proof_path "${PROOF_PATH}" >/dev/null 2>/tmp/verify_stwo.err.$$
+"${STWO_VERIFIER}" --proof_path "${PROOF_PATH}" --proof_format json >/dev/null 2>/tmp/verify_stwo.err.$$
 VERIFIER_RC=$?
 set -e
 

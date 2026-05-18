@@ -24,6 +24,7 @@ stwo-cairo-adapter.workspace = true
 stwo-cairo-serialize.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 ctor.workspace = true
