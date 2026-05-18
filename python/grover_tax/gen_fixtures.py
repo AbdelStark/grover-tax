@@ -33,8 +33,9 @@ from pathlib import Path
 from grover_tax import logging as gt_logging
 from grover_tax.errors import FIXTURE_EXIT_CODE, FixtureError, FixtureSubcode
 from grover_tax.paths import fixture_path, fixtures_dir, repo_root, workload_md_path
-from grover_tax.secp256k1 import add, sample_point_pair, serialize_x, serialize_y
+from grover_tax.secp256k1 import sample_point_pair, serialize_x
 from grover_tax.serialise import UNUSED_CTRL, Gate, Opcode, serialise
+from grover_tax.sim_reference import run
 from grover_tax.workload import Workload, load_workload_md
 from grover_tax.xof import XOF
 
@@ -42,13 +43,13 @@ __all__ = ["main"]
 
 # `SEED` is byte-stable (RFC-0002 §"Inputs"). Changing it changes every
 # fixture in v0.1.x — that's the point.
-SEED: bytes = b"grover-tax-v0.1-2026-05"
+SEED: bytes = b"grover-tax-v0.2-2026"
 
 # `circuit_serialisation_format_version` is `1` in v0.1 (F-INV-6).
 CIRCUIT_SERIALISATION_FORMAT_VERSION = 1
 
 # `version` in the emitted fixture (F-INV-7).
-FIXTURE_VERSION = "v0.1"
+FIXTURE_VERSION = "v0.2"
 
 # Number of decimal places at which JSON dumps round-trip identically.
 # `json.dumps` uses Python's repr for floats; we never emit floats so this
@@ -76,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         "--out",
         type=Path,
         default=None,
-        help="override output path (default: fixtures/v0.1.json at the repo root)",
+        help="override output path (default: fixtures/v0.2.json at the repo root)",
     )
     parser.add_argument(
         "--workload",
@@ -116,18 +117,17 @@ def _build_fixture(workload: Workload) -> dict[str, object]:
     seed_bytes = hashlib.sha256(SEED).digest()
     xof = XOF(seed_bytes)
 
-    # 1. Build the (stub) gate list `C`. v0.1 MVP: 1024 NOPs.
-    circuit = _build_circuit(gate_count=gate_count)
+    # 1. Build the gate list `C`. v0.2: real NOT/CNOT/TOFFOLI mix.
+    circuit = _build_circuit(gate_count=gate_count, xof=xof)
 
-    # 2. Sample N test cases. Each carries `x_hex` (input bytes) and `y_hex`
-    #    (the *honest* `coincurve.add` result, so F-INV-5 holds even though
-    #    the all-NOP stub circuit doesn't itself compute the addition).
+    # 2. Sample N test cases. Each carries `x_hex` (input bytes = P.X || Q.X)
+    #    and `y_hex` (the circuit output over P.X), so F-INV-4
+    #    (sim_reference cross-validation) holds.
     test_cases: list[dict[str, str]] = []
     for _ in range(n_samples):
         p, q = sample_point_pair(xof)
-        x_bytes = serialize_x(p, q)
-        r = add(p, q)
-        y_bytes = serialize_y(r)
+        x_bytes = serialize_x(p, q)  # 64 bytes = P.X || Q.X
+        y_bytes = run(circuit, x_bytes[:32])  # circuit output over P.X (32 bytes)
         test_cases.append({"x_hex": x_bytes.hex(), "y_hex": y_bytes.hex()})
 
     # 3. Canonical byte serialisation of `C` + commitments.
@@ -150,21 +150,31 @@ def _build_fixture(workload: Workload) -> dict[str, object]:
     }
 
 
-def _build_circuit(*, gate_count: int) -> list[Gate]:
-    """v0.1 MVP: all-NOP circuit of `gate_count` gates.
+def _build_circuit(*, gate_count: int, xof: XOF) -> list[Gate]:
+    """v0.2: deterministic NOT/CNOT/TOFFOLI mix over 256 wire indices.
 
-    A real `build_secp256k1_pointadd_circuit(gate_count, bit_stripe_width)`
-    that produces a semantically-meaningful point-add gate sequence lives
-    in a follow-up — the wiring here is identical so swapping the body is
-    a one-function change without touching the surrounding pipeline.
+    Uses XOF bytes to deterministically sample opcodes and wire indices.
+    gate_count is expected to already be a power of two (WORKLOAD.md).
     """
-    nop = Gate(
-        opcode=Opcode.NOP,
-        target=UNUSED_CTRL,
-        ctrl_a=UNUSED_CTRL,
-        ctrl_b=UNUSED_CTRL,
-    )
-    return [nop] * gate_count
+    N_WIRES = 256  # full 256-bit state, wire indices 0..255
+    gates: list[Gate] = []
+    for _ in range(gate_count):
+        opcode_byte = xof.read(1)[0] & 0x3  # values 0, 1, 2, 3
+        if opcode_byte == 0:  # NOP
+            gates.append(Gate(Opcode.NOP, UNUSED_CTRL, UNUSED_CTRL, UNUSED_CTRL))
+        elif opcode_byte == 1:  # NOT
+            t = xof.read(1)[0]  # 0..255, no mod needed for N_WIRES=256
+            gates.append(Gate(Opcode.NOT, t, UNUSED_CTRL, UNUSED_CTRL))
+        elif opcode_byte == 2:  # CNOT
+            t = xof.read(1)[0]
+            a = xof.read(1)[0]
+            gates.append(Gate(Opcode.CNOT, t, a, UNUSED_CTRL))
+        else:  # TOFFOLI (opcode_byte == 3)
+            t = xof.read(1)[0]
+            a = xof.read(1)[0]
+            b = xof.read(1)[0]
+            gates.append(Gate(Opcode.TOFFOLI, t, a, b))
+    return gates  # gate_count is already a power of two
 
 
 def _parse_workload_int(workload: Workload, field_name: str) -> int:

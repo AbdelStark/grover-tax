@@ -145,6 +145,54 @@ pub fn canonical_serialise(gates: @Array<Gate>) -> Array<u8> {
     out
 }
 
+// -- Deserialiser -----------------------------------------------------------
+
+/// Read a `u32` little-endian from 4 bytes at `off`.
+fn read_u32_le(bytes: @Array<u8>, off: u32) -> u32 {
+    let b0: u32 = (*bytes.at(off)).into();
+    let b1: u32 = (*bytes.at(off + 1_u32)).into();
+    let b2: u32 = (*bytes.at(off + 2_u32)).into();
+    let b3: u32 = (*bytes.at(off + 3_u32)).into();
+    b0 + b1 * 0x100_u32 + b2 * 0x10000_u32 + b3 * 0x1000000_u32
+}
+
+/// Read a `u16` as `u32` little-endian from 2 bytes at `off`.
+fn read_u16_le(bytes: @Array<u8>, off: u32) -> u32 {
+    let b0: u32 = (*bytes.at(off)).into();
+    let b1: u32 = (*bytes.at(off + 1_u32)).into();
+    b0 + b1 * 0x100_u32
+}
+
+/// Deserialise `GateListV1` bytes into an `Array<Gate>`.
+///
+/// Mirrors `grover_tax.serialise.deserialise` (Python) byte-for-byte.
+/// Panics on bad magic, non-zero pad bytes, or invalid input length.
+pub fn deserialise(bytes: @Array<u8>) -> Array<Gate> {
+    // Check magic b"GTV1" = [71, 84, 86, 49].
+    assert!(*bytes.at(0) == 71_u8, "deserialise: magic[0]");
+    assert!(*bytes.at(1) == 84_u8, "deserialise: magic[1]");
+    assert!(*bytes.at(2) == 86_u8, "deserialise: magic[2]");
+    assert!(*bytes.at(3) == 49_u8, "deserialise: magic[3]");
+
+    let n_gates: u32 = read_u32_le(bytes, 4_u32);
+
+    let mut out: Array<Gate> = ArrayTrait::new();
+    let mut i: u32 = 0_u32;
+    loop {
+        if i == n_gates { break; }
+        let base: u32 = HEADER_BYTES + i * GATE_BYTES;
+        let opcode: u32 = (*bytes.at(base)).into();
+        let pad: u8 = *bytes.at(base + 1_u32);
+        assert!(pad == 0_u8, "deserialise: non-zero pad");
+        let target: u32  = read_u16_le(bytes, base + 2_u32);
+        let ctrl_a: u32  = read_u16_le(bytes, base + 4_u32);
+        let ctrl_b: u32  = read_u16_le(bytes, base + 6_u32);
+        out.append(Gate { opcode, target, ctrl_a, ctrl_b });
+        i = i + 1_u32;
+    };
+    out
+}
+
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------

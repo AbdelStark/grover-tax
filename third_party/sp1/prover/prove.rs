@@ -4,9 +4,9 @@
 //!
 //!   prove --fixtures <fixtures_path> --output <output_proof_path>
 //!
-//! Reads the v0.1 fixture JSON, decodes
-//! `circuit_byte_serialisation_hex`, feeds `(circuit_bytes, n_samples)`
-//! into the SP1 zkVM program, drives `prove().groth16()`, and writes
+//! Reads the fixture JSON, decodes `circuit_byte_serialisation_hex`,
+//! feeds `(circuit_bytes, n_cases, test_cases)` into the SP1 zkVM
+//! program, drives `prove().groth16()`, and writes
 //! the resulting `SP1ProofWithPublicValues` to `--output` via
 //! `proof.save`.
 //!
@@ -30,9 +30,15 @@ use std::process::ExitCode;
 const ZKP_ECC_ELF: Elf = include_elf!("zkp_ecc-program");
 
 #[derive(Deserialize)]
+struct TestCase {
+    x_hex: String, // 128 hex chars = 64 bytes = P.X || Q.X
+    y_hex: String, // 64 hex chars = 32 bytes = circuit output
+}
+
+#[derive(Deserialize)]
 struct Fixture {
-    n_samples: u64,
     circuit_byte_serialisation_hex: String,
+    test_cases: Vec<TestCase>,
 }
 
 fn parse_args() -> Result<(PathBuf, PathBuf), String> {
@@ -107,16 +113,35 @@ async fn main() -> ExitCode {
 
     let client = ProverClient::from_env().await;
 
-    // The zkVM program performs `gate_count` modular additions over
-    // secp256k1's prime. `gate_count` is the v0.1 workload knob
-    // (WORKLOAD.md, 1024). `fixture.n_samples` is unused on the SP1 side
-    // for the A2 statement (RFC-0005 commitment is computed from
-    // `circuit_bytes` and the loop count is `gate_count`).
-    let _ = fixture.n_samples;
-
+    // Feed circuit bytes + n_cases + test cases to the zkVM.
+    let n_cases = fixture.test_cases.len() as u64;
     let mut stdin = SP1Stdin::new();
-    stdin.write_vec(circuit_bytes);
-    stdin.write(&gate_count);
+    stdin.write_vec(circuit_bytes.clone());
+    stdin.write(&n_cases);
+    for tc in &fixture.test_cases {
+        let x = match hex::decode(&tc.x_hex) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("PROVER.WITNESS_REJECTED: invalid x_hex: {e}");
+                return ExitCode::from(1);
+            }
+        };
+        let y = match hex::decode(&tc.y_hex) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("PROVER.WITNESS_REJECTED: invalid y_hex: {e}");
+                return ExitCode::from(1);
+            }
+        };
+        if x.len() < 32 || y.len() < 32 {
+            eprintln!("PROVER.WITNESS_REJECTED: x or y too short");
+            return ExitCode::from(1);
+        }
+        let x32: [u8; 32] = x[..32].try_into().expect("x slice");
+        let y32: [u8; 32] = y[..32].try_into().expect("y slice");
+        stdin.write(&x32);
+        stdin.write(&y32);
+    }
 
     let pk = match client.setup(ZKP_ECC_ELF).await {
         Ok(p) => p,

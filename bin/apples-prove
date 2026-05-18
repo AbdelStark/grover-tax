@@ -38,7 +38,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
 
-FIXTURE="${REPO_ROOT}/fixtures/v0.1.json"
+FIXTURE="${REPO_ROOT}/fixtures/v0.2.json"
 PROOF_OUT="${REPO_ROOT}/results/apples.proof.bin"
 # The stwo-cairo `verify` binary reads CairoProofForRustVerifier from
 # JSON (sonic_rs::from_str). cairo-serde emits a hex felt array intended
@@ -87,27 +87,34 @@ BL_INPUT="$(mktemp)"
 trap 'rm -f "$BL_INPUT"' EXIT
 
 python3 - <<PYEOF > "$BL_INPUT"
-import json, hashlib, struct, sys
+import json, hashlib, sys
 
 with open("${FIXTURE}") as f:
     fix = json.load(f)
-cb = bytes.fromhex(fix["circuit_byte_serialisation_hex"])
-n = struct.unpack("<I", cb[4:8])[0]
-P = 2**256 - 2**32 - 977
-seed = int.from_bytes(hashlib.blake2s(cb).digest(), "big") % P
-sigma = seed
-for i in range(n):
-    sigma = (sigma + (i + 1)) % P
 
-inner = [
-    seed & ((1 << 128) - 1),
-    seed >> 128,
-    n,
-    sigma & ((1 << 128) - 1),
-    sigma >> 128,
-]
-# Cairo signature is fn(input: Array<felt252>). Cairo Arrays serialize as
-# [len, val0, val1, ...] for scarb / stwo-cairo user_args.
+cb = bytes.fromhex(fix["circuit_byte_serialisation_hex"])
+
+# Blake2s commitment split into lo/hi u128.
+# digest_to_u256_be in Cairo maps: high = bytes[0:16] BE, low = bytes[16:32] BE.
+blake2s_bytes = hashlib.blake2s(cb).digest()
+comm_hi = int.from_bytes(blake2s_bytes[:16],  "big")
+comm_lo = int.from_bytes(blake2s_bytes[16:32], "big")
+
+# Test cases: first 32 bytes of x (= P.X) and 32 bytes of y (= circuit output).
+n_tc = len(fix["test_cases"])
+tc_felts = []
+for tc in fix["test_cases"]:
+    x_bytes = bytes.fromhex(tc["x_hex"])
+    y_bytes = bytes.fromhex(tc["y_hex"])
+    tc_felts.extend(list(x_bytes[:32]))
+    tc_felts.extend(list(y_bytes[:32]))
+
+# Flat input for apples_to_apples_executable (v0.2):
+#   [n_cb, b0..b{n_cb-1}, comm_lo, comm_hi, n_tc, x0_b0..x0_b31, y0_b0..y0_b31, ...]
+n_cb  = len(cb)
+inner = [n_cb, *list(cb), comm_lo, comm_hi, n_tc, *tc_felts]
+
+# Cairo Arrays serialize as [len, val0, val1, ...] for user_args_list.
 user_args = [len(inner), *inner]
 
 data = {
@@ -123,11 +130,10 @@ data = {
     ],
 }
 print(json.dumps(data, indent=2), file=sys.stdout)
-print(f"# σ₀ low:  0x{seed & ((1<<128)-1):032x}", file=sys.stderr)
-print(f"# σ₀ high: 0x{seed >> 128:032x}", file=sys.stderr)
-print(f"# n:       {n}", file=sys.stderr)
-print(f"# σ_N low: 0x{sigma & ((1<<128)-1):032x}", file=sys.stderr)
-print(f"# σ_N hi:  0x{sigma >> 128:032x}", file=sys.stderr)
+print(f"# circuit bytes: {n_cb}", file=sys.stderr)
+print(f"# comm_lo: 0x{comm_lo:032x}", file=sys.stderr)
+print(f"# comm_hi: 0x{comm_hi:032x}", file=sys.stderr)
+print(f"# n_tc:    {n_tc}", file=sys.stderr)
 PYEOF
 
 mkdir -p "$(dirname -- "$PROOF_OUT")"

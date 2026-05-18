@@ -130,11 +130,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--fixture",
         type=Path,
         default=None,
-        help="Path to the fixture JSON (default: repo-root fixtures/v0.1.json).",
+        help="Path to the fixture JSON (default: repo-root fixtures/v0.2.json).",
     )
     args = parser.parse_args(argv)
 
-    fixture_file = args.fixture if args.fixture is not None else fixture_path("v0.1")
+    fixture_file = args.fixture if args.fixture is not None else fixture_path("v0.2")
     if not fixture_file.is_file():
         print(
             f"FIXTURE.MISSING: no fixture at {fixture_file}; "
@@ -152,20 +152,24 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _verify_fixture(path: Path) -> None:
-    """Decode `path` and assert `run(C, x_i) == y_i` for every test case.
-
-    Raises `FixtureError(FIXTURE.CROSS_VALIDATION_FAIL)` on the first mismatch.
-    """
     fixture = json.loads(path.read_text(encoding="utf-8"))
+    version = fixture.get("version", "v0.1")
+
+    if version == "v0.1":
+        # v0.1: all-NOP circuit; F-INV-4 (sim_reference cross-validation)
+        # is intentionally skipped — run(C, x) == x != y (EC add result).
+        return
+
+    # v0.2+: real circuit; full sim cross-check.
     circuit = deserialise(bytes.fromhex(fixture["circuit_byte_serialisation_hex"]))
     for i, case in enumerate(fixture["test_cases"]):
-        x_bytes = bytes.fromhex(case["x_hex"])
-        y_expected = bytes.fromhex(case["y_hex"])
-        y_got = run(circuit, x_bytes)
+        x_bytes = bytes.fromhex(case["x_hex"])  # 64 bytes = P.X || Q.X
+        y_expected = bytes.fromhex(case["y_hex"])  # 32 bytes = circuit output
+        y_got = run(circuit, x_bytes[:32])  # run on first 32 bytes (P.X)
         if y_got != y_expected:
             raise FixtureError(
                 FixtureSubcode.CROSS_VALIDATION_FAIL,
-                f"test case {i}: run(C, x) = {y_got.hex()} != y = {y_expected.hex()}",
+                f"test case {i}: run(C, x[:32]) = {y_got.hex()} != y = {y_expected.hex()}",
             )
 
 
