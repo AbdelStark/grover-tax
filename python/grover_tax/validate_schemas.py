@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -57,8 +58,9 @@ __all__ = [
 
 # Map from a short label (`--schema` arg) to a schema file.
 SCHEMA_NAMES: Final[dict[str, str]] = {
-    "fixture": "fixture-v0.1.schema.json",
+    "fixture": "fixture-v0.2.schema.json",  # v0.2 is the current default (RFC-0015)
     "fixture-v0.1": "fixture-v0.1.schema.json",
+    "fixture-v0.2": "fixture-v0.2.schema.json",
     "setup": "setup-v1.schema.json",
     "setup-v1": "setup-v1.schema.json",
     "discards": "discards-v1.schema.json",
@@ -68,12 +70,14 @@ SCHEMA_NAMES: Final[dict[str, str]] = {
 # Exit-code routing per category.
 _EXIT_BY_SCHEMA: Final[dict[str, int]] = {
     "fixture-v0.1.schema.json": FIXTURE_EXIT_CODE,
+    "fixture-v0.2.schema.json": FIXTURE_EXIT_CODE,
     "setup-v1.schema.json": REPORT_EXIT_CODE,
     "discards-v1.schema.json": REPORT_EXIT_CODE,
 }
 
 _SUBCODE_BY_SCHEMA: Final[dict[str, str]] = {
     "fixture-v0.1.schema.json": FixtureSubcode.SCHEMA_INVALID.value,
+    "fixture-v0.2.schema.json": FixtureSubcode.SCHEMA_INVALID.value,
     "setup-v1.schema.json": ReportSubcode.SCHEMA_INVALID.value,
     "discards-v1.schema.json": ReportSubcode.SCHEMA_INVALID.value,
 }
@@ -81,13 +85,34 @@ _SUBCODE_BY_SCHEMA: Final[dict[str, str]] = {
 # Detection rules: ordered tuples of (filename or path substring, schema).
 # The first match wins; `discards.log` must be checked before "setup" because
 # a runner might one day rename a discards log to include "setup" in its
-# prefix and we want the JSON-lines path to take precedence.
+# prefix and we want the JSON-lines path to take precedence. Fixture-version
+# detection by content (the JSON's `version` field) takes precedence over
+# filename — see `_detect_fixture_version`.
 AUTO_DETECT_NAMES: Final[tuple[tuple[str, str], ...]] = (
     ("discards.log", "discards-v1.schema.json"),
     ("setup", "setup-v1.schema.json"),
+    ("v0.2.json", "fixture-v0.2.schema.json"),
     ("v0.1.json", "fixture-v0.1.schema.json"),
-    ("fixture", "fixture-v0.1.schema.json"),
+    ("fixture", "fixture-v0.2.schema.json"),  # default to v0.2 for unversioned filenames
 )
+
+
+def _detect_fixture_version(path: Path) -> str | None:
+    """Read the JSON file and return the matching fixture schema iff the file
+    looks like a fixture (has a `version` key whose value is `v0.1`/`v0.2`).
+    Returns None if the file is unreadable or unrecognised."""
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            head = f.read(4096)
+        # Cheap version probe — we look for `"version": "v0.X"` in the first
+        # 4 KiB; the version field is always emitted near the top by
+        # gen_fixtures.py. Full JSON parse happens later in validate_file().
+        m = re.search(r'"version"\s*:\s*"(v0\.[12])"', head)
+        if m is None:
+            return None
+        return f"fixture-{m.group(1)}.schema.json"
+    except OSError:
+        return None
 
 
 def _resolve_schema(*, explicit: str | None, path: Path) -> str:
@@ -99,6 +124,15 @@ def _resolve_schema(*, explicit: str | None, path: Path) -> str:
                 f"valid: {sorted(set(SCHEMA_NAMES))}"
             )
         return SCHEMA_NAMES[explicit]
+
+    # Content-based detection wins over filename: a file named `v0.1.json`
+    # but containing `"version": "v0.2"` should route to the v0.2 schema.
+    # gen_fixtures.py tests in CI write to `tmp_path / "v0.1.json"` regardless
+    # of which version the generator currently emits.
+    if path.is_file():
+        content_match = _detect_fixture_version(path)
+        if content_match is not None:
+            return content_match
 
     # Search both the filename and the full path so that files under
     # `python/tests/fixtures/bad/` match by parent-directory hint.

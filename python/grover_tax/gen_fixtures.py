@@ -156,20 +156,23 @@ def _build_circuit(*, gate_count: int, xof: XOF) -> list[Gate]:
     Uses XOF bytes to deterministically sample opcodes and wire indices.
     gate_count is expected to already be a power of two (WORKLOAD.md).
     """
-    N_WIRES = 256  # full 256-bit state, wire indices 0..255
+    # 256-bit state, wire indices 0..255; `xof.read(1)[0]` is already 0..255
+    # so no modular reduction is needed. The TOFFOLI branch is reached by the
+    # `else` arm; the explicit constants below disambiguate the 0/1/2 match.
+    OPCODE_NOP, OPCODE_NOT, OPCODE_CNOT = 0, 1, 2
     gates: list[Gate] = []
     for _ in range(gate_count):
         opcode_byte = xof.read(1)[0] & 0x3  # values 0, 1, 2, 3
-        if opcode_byte == 0:  # NOP
+        if opcode_byte == OPCODE_NOP:
             gates.append(Gate(Opcode.NOP, UNUSED_CTRL, UNUSED_CTRL, UNUSED_CTRL))
-        elif opcode_byte == 1:  # NOT
-            t = xof.read(1)[0]  # 0..255, no mod needed for N_WIRES=256
+        elif opcode_byte == OPCODE_NOT:
+            t = xof.read(1)[0]
             gates.append(Gate(Opcode.NOT, t, UNUSED_CTRL, UNUSED_CTRL))
-        elif opcode_byte == 2:  # CNOT
+        elif opcode_byte == OPCODE_CNOT:
             t = xof.read(1)[0]
             a = xof.read(1)[0]
             gates.append(Gate(Opcode.CNOT, t, a, UNUSED_CTRL))
-        else:  # TOFFOLI (opcode_byte == 3)
+        else:  # opcode_byte == 3, TOFFOLI
             t = xof.read(1)[0]
             a = xof.read(1)[0]
             b = xof.read(1)[0]

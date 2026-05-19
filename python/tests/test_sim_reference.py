@@ -212,9 +212,16 @@ def test_run_does_not_mutate_input_bytes() -> None:
 
 
 def _write_fake_fixture(path: Path, gates: list[Gate], cases: list[tuple[str, str]]) -> None:
-    """Write a fixture-shaped JSON with arbitrary gate list + test cases."""
+    """Write a v0.2 fixture-shaped JSON with arbitrary gate list + test cases.
+
+    Uses `version: "v0.2"` so `sim_reference._verify_fixture` takes the
+    F-INV-4-active path (full `run(C, x[:32]) == y` cross-check). The v0.1
+    path intentionally skips F-INV-4 (legacy point-add proxy) and would
+    accept a tampered fixture; we want the test to exercise the active
+    verification path.
+    """
     fixture = {
-        "version": "v0.1",
+        "version": "v0.2",
         "generator_commit": "0" * 40,
         "workload_pin_commit": "1" * 40,
         "seed_hex": "2" * 64,

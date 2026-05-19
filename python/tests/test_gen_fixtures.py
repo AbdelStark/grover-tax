@@ -78,12 +78,14 @@ def test_build_fixture_satisfies_invariant_1() -> None:
 
 
 def test_build_fixture_test_case_shapes_match_schema() -> None:
-    """`x_hex` is 128 chars, `y_hex` is 66 chars per the fixture schema."""
+    """v0.2 schema: `x_hex` is 128 chars (preserved from v0.1; prover consumes
+    only the first 32 bytes per RFC-0015 §3.5), `y_hex` is 64 chars (the
+    32-byte circuit output state)."""
     workload = load_workload_md(workload_md_path())
     fixture = _build_fixture(workload)
     for case in fixture["test_cases"]:
         assert len(case["x_hex"]) == 128
-        assert len(case["y_hex"]) == 66
+        assert len(case["y_hex"]) == 64
 
 
 def test_seed_hex_matches_sha256_of_constant_seed() -> None:
