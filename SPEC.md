@@ -1,8 +1,10 @@
-# SPEC — `grover-tax` v0.1
+# SPEC — `grover-tax` v0.2
 
-This is the single-page index for the canonical specification of `grover-tax`, the single-laptop, single-core, no-GPU benchmark of Stwo vs SP1+Groth16 on a fixed ECDLP point-addition ZKP.
+This is the single-page index for the canonical specification of `grover-tax`, the single-laptop, single-core, no-GPU benchmark of Stwo vs SP1 on bit-level gate-circuit execution against a fixed reversible classical circuit.
 
-The PRD (`PRD.md`) is the historical statement of intent. The specification *below* is the implementation contract. Where they disagree, the spec wins; where the spec is silent, the PRD is informative.
+**v0.2 status:** authoritative spec is `docs/spec/v0.2/SPEC-v0.2.md` (master) plus RFC-0015..RFC-0022 (new). The v0.1 corpus (RFC-0001..RFC-0014 plus `docs/spec/0X-*.md`) remains load-bearing for methodology RFCs (workload pinning, commitment divergence, wrapper contract, measurement protocol, single-core, hygiene, reporting, versions lock, reproducibility, governance). The v0.2 RFCs *supersede* RFC-0003, RFC-0004, RFC-0006 for the proof-statement and prover-architecture aspects, and *amend* most others via RFC-0021.
+
+The PRD (`PRD.md`) is the historical statement of intent and is now superseded for `§2 Proof statement` by RFC-0015. The specification *below* is the implementation contract. Where they disagree, the spec wins; where the spec is silent, the PRD is informative.
 
 ## Executive summary
 
@@ -52,26 +54,35 @@ Schemas live at `docs/spec/schemas/` (JSON Schema, draft 2020-12). Templates liv
 | RFC | Subsystem | Status | Decision locked |
 |---|---|---|---|
 | RFC-0001 | Workload pin | Accepted | Six fields in `WORKLOAD.md` frozen against upstream commit; CI gate rejects `TBD`. |
-| RFC-0002 | Fixture pipeline | Accepted | Deterministic Python generator + JSON Schema + `--check` mode. |
-| RFC-0003 | Reference simulator | Accepted | Pure Python re-implementation of `sim.rs` as cross-validation oracle. |
-| RFC-0004 | Cairo circuit | Accepted | `[u31; 9]` for 256-bit state; constant-cost `step()`; in-circuit Blake2s commitment. |
-| RFC-0005 | Commitment divergence | Accepted | SP1 = SHA-256 (upstream native); Stwo = Blake2s. Both bind the same bytes. |
-| RFC-0006 | SP1 patch | Accepted | < 50-line patch reading fixture from JSON + emitting proof to argv. |
-| RFC-0007 | Wrapper contract | Accepted | `bin/run_<prover>.sh <fixtures> <output>`; `bin/verify_<prover>.sh <proof>`; symmetric. |
-| RFC-0008 | Measurement | Accepted | hyperfine `--warmup 1 --runs 10` (M1); `--warmup 3 --runs 50` (M5); gnu-time `-v` for M2/M3/M4. |
-| RFC-0009 | Single-core / no-GPU | Accepted | Env caps + OS affinity + GPU residency check; macOS gap disclosed. |
-| RFC-0010 | Hygiene | Accepted | `preflight.sh`, thermal protocol, day-1/day-2 stability gate, locked discard rules. |
-| RFC-0011 | Reporting | Accepted | `RESULTS.md` template, required disclosures, methodology lint, ratio convention. |
-| RFC-0012 | Versions lock | Accepted | `versions.lock` JSON; `preflight.sh` drift check. |
-| RFC-0013 | Reproducibility envelope | Accepted | Three tiers (byte-stable, number-stable, distribution-stable); fixture is Tier 1. |
-| RFC-0014 | Governance | Accepted | MIT root; CI matrix; CODEOWNERS; branch protection; submodule consumption. |
+| RFC-0002 | Fixture pipeline | Accepted (amended by RFC-0021 §16: SHAKE-256) | Deterministic Python generator + JSON Schema + `--check` mode. |
+| RFC-0003 | Reference simulator | Superseded by RFC-0015 §3.4 for gate semantics | Pure Python re-implementation; v0.2-aware `_verify_fixture`. |
+| RFC-0004 | Cairo circuit (v0.1) | **Superseded by RFC-0016** | `[u31; 9]` for 256-bit state; constant-cost `step()`; in-circuit Blake2s. |
+| RFC-0005 | Commitment divergence | Accepted (amended by RFC-0019 §5) | SP1 = SHA-256; Stwo = Blake2s. Both bind the same bytes; cost asymmetry quantified. |
+| RFC-0006 | SP1 patch (v0.1) | **Superseded by RFC-0017** (patch-budget retired) | v0.2: freshly-owned zkVM program at `third_party/sp1/program/`. |
+| RFC-0007 | Wrapper contract | Accepted (amended by RFC-0021 §§5, 7) | M7 from real prover; macOS affinity-class assertion dropped. |
+| RFC-0008 | Measurement | Accepted (amended by RFC-0021 §§4, 5, 6, 11) | FIXTURE_PATH; bootstrap CI for day-2; Mann-Kendall trend. |
+| RFC-0009 | Single-core / no-GPU | Accepted (amended by RFC-0021 §7) | macOS QoS-class read removed; `taskpolicy` invocation logged. |
+| RFC-0010 | Hygiene | Accepted (amended by RFC-0021 §11) | `preflight.sh` + bootstrap-CI stability gate. |
+| RFC-0011 | Reporting | Accepted (amended by RFC-0021 §2) | Methodology lint extended with L1-L6. |
+| RFC-0012 | Versions lock | Accepted (amended by RFC-0021 §3) | New fields: `os_build`, `sp1.toolchain_sha256`, `sp1.fri_params`, `stwo.circle_fri_params`, etc. |
+| RFC-0013 | Reproducibility envelope | Accepted (amended by RFC-0021 §§12, 13) | `SOURCE_DATE_EPOCH` set; equivalence class formalised. |
+| RFC-0014 | Governance | Accepted (amended by RFC-0021 §18) | CODEOWNERS hardening on `third_party/sp1/program/`, `stwo-side/cairo/src/`, `docs/spec/v0.2/`. |
+| **RFC-0015** | **v0.2 proof statement** | **Accepted** | **Formal `Φ_v0.2`: gate-execution + commitment binding; replaces point-add language.** |
+| **RFC-0016** | **Cairo gate-execution AIR** | **Accepted** | **`apples_to_apples_executable`; constant-cost-per-gate; carry-slack soundness.** |
+| **RFC-0017** | **SP1 gate-execution program** | **Accepted** | **`zkp_ecc-program` + `prove.rs`; constant-cycle-per-gate; public-input anchoring.** |
+| **RFC-0018** | **Operations-counted equivalence** | **Accepted** | **`rows_X = c·n_tc·n_g + k·|cb| + b + B`; per-row efficiency factor.** |
+| **RFC-0019** | **Soundness, ZK, binding** | **Accepted** | **100-bit conjectured floor; ZK explicitly not claimed; commitment cost quantified.** |
+| **RFC-0020** | **Extended threat model** | **Accepted** | **A_anchor and A_statement adversaries; `apples-verify` defence.** |
+| **RFC-0021** | **Reproducibility hardening** | **Accepted** | **Committed lockfiles, schema fields, new error codes, methodology lint extensions.** |
+| **RFC-0022** | **Bootloader integration** | **Accepted** | **`bin/apples-prove` + `bin/apples-verify`; Pedersen disclosure; bootloader `B` constant.** |
 
 ## Reading order
 
 - **Reproducer** (clone-and-run): `README.md` → `RESULTS.md` (after running).
-- **Reviewer** (judging fairness): `docs/spec/00-overview.md`, then `RFC-0005`, `RFC-0009`, `RFC-0011`.
-- **Implementer** (writing code): `docs/spec/01-architecture.md`, `02-public-api.md`, `03-data-model.md`, then the RFC for the subsystem.
-- **Operator** (running the measurement series): `docs/spec/05-observability.md`, `08-performance-budget.md`, `RFC-0008`, `RFC-0010`.
+- **Cryptographic reviewer** (judging fairness): `docs/spec/v0.2/SPEC-v0.2.md` → RFC-0015 → RFC-0018 → RFC-0019 → RFC-0020 → RFC-0005.
+- **Implementer** (writing code): `docs/spec/v0.2/SPEC-v0.2.md` → RFC-0016 (Stwo) or RFC-0017 (SP1) → RFC-0022 (bootloader) → `docs/spec/01-architecture.md`, `02-public-api.md`, `03-data-model.md`.
+- **Operator** (running the measurement series): `docs/spec/v0.2/SPEC-v0.2.md` §7 → `docs/spec/05-observability.md`, `08-performance-budget.md`, `RFC-0008` (amended by RFC-0021) → `RFC-0010`.
+- **Methodology auditor:** `docs/spec/v0.2/GAP-ANALYSIS.md` → RFC-0021 → RFC-0011 → `RESULTS.md` lint output.
 
 ## Open questions
 
