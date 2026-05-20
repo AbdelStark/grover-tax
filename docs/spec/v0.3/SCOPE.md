@@ -28,6 +28,7 @@ its numbers as headline until every Tier-A item is green in CI.
 | A9 | Day-1 / Day-2 stability gate fires on bootstrap-CI exclusion of 5% threshold (not point estimate) | RFC-0021 §11, RFC-0024 |
 | A10 | Methodology lint extensions `L1`–`L6` enforced in CI: ops-counted-footprint section, commitment-cost row, soundness-floor declaration, bootloader Pedersen disclosure, apples-verify confirmation, sample-size bounds | RFC-0021 §2, RFC-0024 |
 | A11 | Cross-prover FRI parameter equivalence: SP1 and Stwo proof generation at FRI parameter sets that give the same conjectured soundness floor; ratio reported is at *matched soundness* | RFC-0026 |
+| A12 | M9 (deterministic-setup wall-clock) captured separately from M5; reported in `RESULTS.md` under "Verify breakdown" per RFC-0024 §2.12; SP1 verifier wired to `SP1_VK_CACHE` (commit `6236340`) so M5 measures the production-realistic per-verify cost (excludes one-time setup) | RFC-0024 §2.12 |
 
 ## Tier B — Workload (must-have)
 

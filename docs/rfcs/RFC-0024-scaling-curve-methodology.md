@@ -204,6 +204,61 @@ Implemented per RFC-0026 §4. `preflight.sh` computes both stacks'
 conjectured soundness; aborts if they differ by > 1 bit. Tests
 `S26-T1`, `S26-T2`.
 
+### 2.12 M9 (deterministic-setup wall-clock) — new metric (P0.14)
+
+**Motivation.** The 2026-05-20 v0.2 SP1 M5 measurement (190.349 s)
+included ~5 s of deterministic key derivation from the ELF
+(`ProverClient::setup(ZKP_ECC_ELF)`) plus ~185 s of per-verify
+recursive-STARK work. The setup is a one-time cost in production
+deployments — it can be cached and amortised over many verifies. v0.3
+separates this out so reporting reflects production-realistic
+verification cost.
+
+**Definition.** M9 = wall-clock of `ProverClient::setup(ELF)` on a
+cold VK cache, captured *once* per ELF per measurement series via:
+
+```bash
+SP1_VK_CACHE=/tmp/sp1-vk.bin SP1_VERIFIER_TIMING=1 \
+    third_party/sp1/target/release/verifier \
+    --fixtures "${FIXTURE_PATH}" \
+    --proof "${WARMUP_PROOF_PATH}" \
+    2>&1 | grep -E "^\[setup\]" | awk '{print $2}'
+```
+
+The diagnostic value goes into `results/sp1_setup.json::deterministic_setup_ms`
+(distinct from `groth16_setup.json` which is the trusted-setup slot).
+
+**M5 (per-verify, repeatable):** the hyperfine series runs with
+`SP1_VK_CACHE` set to the populated cache file, so each measured
+invocation skips the setup phase and times only the recursive-STARK
+verify path. This is the **production-realistic per-verify cost** and
+the value `RESULTS.md` reports for ρ_verify.
+
+**Reporting structure** in `RESULTS.md` (RFC-0024 §4.2 amends RFC-0011):
+
+```
+## Verify breakdown
+
+| Component (single-threaded) | SP1 | Stwo |
+|---|---|---|
+| M9 — deterministic setup (one-time, amortised over N verifies)  | <X> s | 0 ms |
+| M5 — per-verify (recursive-STARK / FRI commitment check)        | <Y> s | <Z> ms |
+
+ρ_verify = median(M5_SP1) / median(M5_Stwo) = <ρ>
+
+Verify-cost-amortised ratio at N=1 (cold): (M9 + M5)_SP1 / (M9 + M5)_Stwo = <ρ_amortised_cold>
+Verify-cost-amortised ratio at N→∞ (warm): ρ_verify
+```
+
+The v0.3 headline reports ρ_verify (warm, amortised). The cold ρ is
+documented but not used as the headline number. Test `S24-T8`:
+deterministic setup file is present and `deterministic_setup_ms > 0`.
+
+**Stwo M9 is structurally zero**: the Stwo Cairo verifier has no
+per-program setup; it loads the proof and runs FRI commitment opening
+directly. RFC-0011 disclosure §"Setup-vs-verify asymmetry" makes this
+explicit.
+
 ## 3. Scaling-curve protocol
 
 ### 3.1 Scale tiers

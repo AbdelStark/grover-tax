@@ -48,9 +48,37 @@ the v0.3 target (`OPEN-Q-22-1`).
 
 The Stwo *verify* taking **58 ms** versus SP1's 190 s is structural:
 Stwo's Circle-STARK verifier is a small FRI commitment check; SP1's
-verifier replays the proof through `sp1-sdk::ProverClient::verify` which
-involves a much larger machine-trace recheck. RFC-0019 §6.1 covers the
-verifier-equivalence framing.
+verifier replays the proof through a *recursive STARK* on the verifier
+circuit (`sp1-sdk::ProverClient::verify`). Two structurally different
+verification algorithms running under the same RFC-0009 single-core
+caps.
+
+### Setup-vs-verify breakdown (added 2026-05-20 18:58 UTC)
+
+Post-publication diagnostic (4 standalone runs against the same proof
+artifact, instrumented via `SP1_VERIFIER_TIMING=1`) confirmed the
+**190 s SP1 verify is dominated by cryptographic verify work, not by
+deterministic key derivation**:
+
+| Component | SP1 (single-threaded) | Stwo (single-threaded) |
+|---|---|---|
+| Deterministic VK setup (one-time per ELF) | ~5 s | ~0 ms |
+| Verify cryptographic work (FRI + recursive STARK) | ~185 s | ~58 ms |
+| Total M5 wall-clock | **190.349 s** | **58.2 ms** |
+
+The 5 s setup is the `ProverClient::setup(ELF)` call, which is a
+deterministic function of the ELF and can be cached once the
+verifying key is derived (see commit `6236340` for the SP1 verifier's
+`SP1_VK_CACHE` env var implementation). In a production deployment
+that runs many verifies per ELF, the 5 s setup amortises to zero;
+the per-verify cost stays at ~185 s under single-threaded
+`RAYON_NUM_THREADS=1` and at ~50 s wall-clock with multi-threaded
+rayon enabled (user-CPU ~170 s, ≈3.4× parallelism on the c3-standard-8).
+
+The 3270× ρ_verify ratio is therefore **legitimate** at the
+single-threaded measurement scope. It is *not* a setup artifact. v0.3
+will split this into M5 (per-verify, repeatable) and M9 (one-time
+setup) per RFC-0024 §2.10 amended by `docs/spec/v0.3/`.
 
 1 cold-cache discard (Stwo, the expected D-INV-3). 0 thermal events,
 0 swap, 0 GPU residency.

@@ -197,6 +197,13 @@ RFC-0008 amended by RFC-0021 amended by RFC-0024:
    to catch a per-run public-input mismatch fast (RFC-0024 §6).
 6. **Trend detection (Mann-Kendall) flags warming** per run series
    (RFC-0021 §6).
+7. **M9 (deterministic-setup wall-clock) captured separately from M5**
+   (per-verify wall-clock). The SP1 verifier's `ProverClient::setup(ELF)`
+   call is a deterministic function of the ELF and is cached via the
+   `SP1_VK_CACHE` env var (introduced in commit `6236340`, behind the
+   verifier's `--vk-cache` indirection). v0.3 reporting separates the
+   one-time M9 cost from the per-invocation M5 cost so a reader can
+   assess production-realistic verify performance.
 
 ## 8. Reporting
 
@@ -209,6 +216,13 @@ gains:
   scale.
 - An **operations-counted footprint** table (RFC-0018 §4) per scale tier.
 - A **commitment-cost-asymmetry** quantitative breakdown (RFC-0019 §5).
+- A **setup-vs-verify breakdown** (M9 vs M5) per RFC-0024 §2.10 — required
+  because v0.2's diagnostic (`headline-runs/2026-05-20-v0.2/README.md`
+  §"Setup-vs-verify breakdown") established that ~2.5% of v0.2's
+  reported 190 s SP1 M5 is one-time setup; the remaining ~185 s is
+  per-verify recursive-STARK work. A production deployment that
+  amortises setup over many verifies sees only the ~185 s cost. Stwo's
+  M9 is ~0 ms (FRI-commitment verifier has no per-program setup).
 - A **methodology-paper anchor** subsection summarising the audit chain.
 - A **known limitations** section listing any Tier-C item missing at
   release.
