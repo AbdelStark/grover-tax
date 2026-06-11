@@ -34,6 +34,7 @@
 
 pub mod fiat_shamir;
 pub mod resource;
+pub mod statement;
 
 use std::collections::BTreeMap;
 use std::fmt;
