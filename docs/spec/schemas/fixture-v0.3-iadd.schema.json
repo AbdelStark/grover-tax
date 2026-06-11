@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/AbdelStark/grover-tax/main/docs/spec/schemas/fixture-v0.3-iadd.schema.json",
   "title": "grover-tax fixture v0.3-iadd",
-  "description": "Schema for fixtures/v0.3-iadd-T<tier>.json — the repeated-addition (Khattar/Google) workload (KB-4, #116). The circuit is K concatenated copies of iadd64.kmx; test cases are register-aware two-register pairs (x, y) -> ((x + K*y) mod 2^width, y). Tier-1 cases are SUPPLIED (deterministic), not in-proof Fiat-Shamir-derived (KB-9, #121). Commitment policy: kmx_source_sha256 is over the RAW single-repetition .kmx bytes (cross-comparable with upstream sha256(iadd64.kmx)); circuit_commitment_* are over OUR GTV1 bytes of the K-repeated circuit (internal integrity). See docs/spec/v0.3/COMMITMENT-POLICY.md.",
+  "description": "Schema for fixtures/v0.3-<circuit>-k<K>-n<N>.json — the repeated-addition (Khattar/Google) workload (KB-4 #116, KB-15 #127). The fixture stores GTV1 bytes of ONE adder repetition; `repetitions` records K and the prover sides loop the gate list K times per test case in-proof (mirroring upstream, whose guest receives the circuit once plus num_repetitions). Test cases are register-aware two-register pairs (x, y) -> ((x + K*y) mod 2^width, y). Tier-1 cases are SUPPLIED (deterministic), not in-proof Fiat-Shamir-derived (KB-9, #121). Commitment policy: kmx_source_sha256 is over the RAW .kmx bytes (cross-comparable with upstream sha256(<circuit>.kmx)); circuit_commitment_* are over OUR GTV1 bytes of the single stored repetition (internal integrity). See docs/spec/v0.3/COMMITMENT-POLICY.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -40,12 +40,12 @@
       "pattern": "^[0-9a-f]{40}$"
     },
     "workload_pin_commit": {
-      "description": "Upstream zkp_ecc SHA recorded in WORKLOAD.md frontmatter at generation time.",
+      "description": "Upstream zkp_ecc SHA the .kmx circuit was vendored from (supersedes WORKLOAD.md's v0.1 pin for the iadd workload until KB-5/#117 re-pins it).",
       "type": "string",
       "pattern": "^[0-9a-f]{40}$"
     },
     "seed_hex": {
-      "description": "sha256(SEED) — 32 bytes, lowercase hex, length 64. Seeds the deterministic test-case XOF.",
+      "description": "sha256(SEED || sha256(kmx bytes) || K_le8 || N_le8) — 32 bytes, lowercase hex. Seeds the deterministic test-case XOF, binding the case stream to the exact circuit and (K, N) benchmark point (a step toward KB-9's in-proof Fiat-Shamir derivation).",
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
@@ -55,9 +55,9 @@
       "pattern": "^T[0-9]+$"
     },
     "circuit_source": {
-      "description": "The upstream kickmix source circuit, repeated `repetitions` times.",
+      "description": "The upstream kickmix source circuit, executed `repetitions` times.",
       "type": "string",
-      "enum": ["iadd64.kmx", "iadd8.kmx"]
+      "enum": ["iadd64.kmx", "iadd8.kmx", "iadd256.kmx"]
     },
     "kmx_source_sha256": {
       "description": "SHA-256 over the RAW single-repetition .kmx bytes. Cross-comparable with upstream's sha256(<circuit>.kmx). RECOMMENDED commitment for head-to-head comparison.",
@@ -65,7 +65,7 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "repetitions": {
-      "description": "K — the number of concatenated copies of the source circuit (the scaling knob). Repeated addition computes (x + K*y) mod 2^width.",
+      "description": "K — how many times the prover executes the stored gate list per test case (the scaling knob). Repeated addition computes (x + K*y) mod 2^width. The stored circuit bytes hold ONE repetition.",
       "type": "integer",
       "minimum": 1
     },
@@ -89,7 +89,7 @@
       "minimum": 1
     },
     "n_samples": {
-      "description": "Number of supplied test cases. Must equal len(test_cases).",
+      "description": "Number of supplied test cases (upstream: shots). Must equal len(test_cases).",
       "type": "integer",
       "minimum": 1
     },
@@ -103,17 +103,17 @@
       "const": 1
     },
     "circuit_byte_serialisation_hex": {
-      "description": "Canonical GTV1 byte serialisation of the K-repeated gate-list, lowercase hex, even length.",
+      "description": "Canonical GTV1 byte serialisation of ONE adder repetition, lowercase hex, even length. Provers execute these gates `repetitions` times per test case.",
       "type": "string",
       "pattern": "^([0-9a-f]{2})+$"
     },
     "circuit_commitment_sha256_hex": {
-      "description": "sha256 over the GTV1 bytes (SP1-side internal integrity).",
+      "description": "sha256 over the stored single-repetition GTV1 bytes (SP1-side internal integrity).",
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
     "circuit_commitment_blake2s_hex": {
-      "description": "blake2s over the GTV1 bytes (Stwo-side internal integrity).",
+      "description": "blake2s over the stored single-repetition GTV1 bytes (Stwo-side internal integrity).",
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
@@ -123,12 +123,12 @@
       "minimum": 1
     },
     "demanded_max_non_clifford_count": {
-      "description": "Forward-looking: the non-Clifford (TOFFOLI/CCZ) gate-count bound.",
+      "description": "Forward-looking: the non-Clifford (TOFFOLI/CCZ) gate-count bound across all K repetitions (upstream scales this by the repetition count: SCALED_TOFFOLI = TOFFOLI * nrep).",
       "type": "integer",
       "minimum": 0
     },
     "demanded_max_circuit_instructions": {
-      "description": "Forward-looking: the total-instruction bound.",
+      "description": "Forward-looking: the total-instruction bound across all K repetitions (gates-per-repetition * K).",
       "type": "integer",
       "minimum": 1
     },
@@ -161,12 +161,12 @@
           "minimum": 0
         },
         "x_hex": {
-          "description": "Encoded input state (num_qubits bits, little-endian byte layout): r0:=x, r1:=y.",
+          "description": "Encoded input state (num_qubits bits, little-endian byte layout): r0:=x, r1:=y, ancillae zero.",
           "type": "string",
           "pattern": "^([0-9a-f]{2})+$"
         },
         "y_hex": {
-          "description": "Expected output state after running the K-repeated circuit: r0:=(x + K*y) mod 2^width, r1:=y.",
+          "description": "Expected output state after K repetitions of the stored circuit: r0:=(x + K*y) mod 2^width, r1:=y, ancillae zero.",
           "type": "string",
           "pattern": "^([0-9a-f]{2})+$"
         }

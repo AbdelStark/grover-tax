@@ -1,22 +1,37 @@
-"""`uv run gen-iadd-fixtures` — repeated-addition fixture generator (KB-4, #116).
+"""`uv run gen-iadd-fixtures` — repeated-addition fixture generator (KB-4 #116, KB-15 #127).
 
-Builds the `v0.3-iadd` fixtures for the Khattar/Google benchmark: the circuit is
-`K` concatenated copies of the upstream `iadd64.kmx` adder (the scaling knob,
-KB-7/#119), transpiled to GTV1 via `grover_tax.kmx`, with register-aware
-two-register test cases from `grover_tax.registers`.
+Builds the `v0.3-iadd` fixtures for the Khattar/Google benchmark: an upstream
+kickmix in-place adder (`iadd64.kmx`, `iadd256.kmx`, …) executed `K` times
+(the scaling knob, KB-7/#119), transpiled to GTV1 via `grover_tax.kmx`, with
+register-aware two-register test cases from `grover_tax.registers`.
 
-The emitted file (`fixtures/v0.3-iadd-T<tier>.json`) is validated in-process
-against `docs/spec/schemas/fixture-v0.3-iadd.schema.json`; a shape violation is
-a generator defect (`FIXTURE.SCHEMA_INVALID`). `--check` regenerates and
-compares byte-for-byte (modulo `generator_commit`), so CI can prove the fixture
-is reproducible.
+**Storage model:** the fixture stores the GTV1 bytes of **one** adder
+repetition; `repetitions` records `K` and the prover sides loop the gate list
+`K` times per test case in-proof. This mirrors upstream, whose guest receives
+the circuit once plus `num_repetitions` and commits `K` as a public value
+(`example_zkp_fuzzer.rs`), and it keeps the fixture a constant ~20 KB at any
+`K` — at the reference scale (`iadd256`, K≈8000, Tanuj's 8xA100 SP1 curve)
+embedded concatenation would mean ~163 MB of circuit bytes.
+
+Expected outputs come from independent integer math
+(`r0' = r0 + K·r1 mod 2^width`, the relation the upstream fuzzer asserts); the
+reference simulator replays as many full K-repetition cases as fit a fixed
+gate-step budget (all of them at small scales), so cross-validation never makes
+large-K generation infeasible. The supplied-case XOF is seeded by
+`sha256(SEED ‖ sha256(kmx bytes) ‖ K ‖ N)`, binding the case stream to the
+exact circuit and benchmark point — one step shy of KB-9's (#121) in-proof
+Fiat-Shamir derivation.
+
+The emitted file (`fixtures/v0.3-<circuit>-k<K>-n<N>.json`) is validated
+in-process against `docs/spec/schemas/fixture-v0.3-iadd.schema.json`; a shape
+violation is a generator defect (`FIXTURE.SCHEMA_INVALID`). `--check`
+regenerates and compares byte-for-byte (modulo `generator_commit`), so CI can
+prove the fixture is reproducible.
 
 Commitment policy (`docs/spec/v0.3/COMMITMENT-POLICY.md`): the fixture commits
 the **raw single-repetition `.kmx` SHA-256** (`kmx_source_sha256`,
-cross-comparable with upstream) *and* the GTV1 SHA-256/Blake2s (internal
-integrity). Repeated addition applied to `(x, y)` computes
-`(x + K·y mod 2^width, y)`; `y_hex` is produced by running the actual K-repeated
-circuit, so the fixture stays self-consistent for any `K`.
+cross-comparable with upstream) *and* the GTV1 SHA-256/Blake2s over the stored
+single-repetition bytes (internal integrity).
 """
 
 from __future__ import annotations
@@ -34,22 +49,39 @@ from pathlib import Path
 from grover_tax import logging as gt_logging
 from grover_tax.errors import FIXTURE_EXIT_CODE, FixtureError, FixtureSubcode
 from grover_tax.kmx import KmxCircuit, kmx_source_sha256, opcode_histogram, transpile_file
-from grover_tax.paths import fixtures_dir, repo_root, workload_md_path
-from grover_tax.registers import encode_registers, iadd_test_cases, min_state_bytes, run_adder_case
+from grover_tax.paths import fixtures_dir, repo_root
+from grover_tax.registers import encode_registers, iadd_test_cases, min_state_bytes
 from grover_tax.serialise import Opcode, serialise
+from grover_tax.sim_reference import run
 from grover_tax.validate_schemas import validate_artifact
-from grover_tax.workload import load_workload_md
 
 __all__ = ["build_iadd_fixture", "main"]
 
-# Byte-stable seed for the supplied-case stream. Changing it changes every
-# v0.3-iadd fixture — by design.
+# Byte-stable seed prefix for the supplied-case stream; mixed with the kmx
+# hash and the (K, N) benchmark point before seeding the XOF. Changing it
+# changes every v0.3-iadd fixture — by design.
 SEED: bytes = b"grover-tax-v0.3-iadd-2026"
 
 FIXTURE_VERSION = "v0.3-iadd"
 CIRCUIT_SERIALISATION_FORMAT_VERSION = 1
 SCHEMA_FILENAME = "fixture-v0.3-iadd.schema.json"
 _BIT_STRIPE_WIDTH = 64  # verbatim from upstream batching (WORKLOAD.md)
+
+# `tanujkhattar/zkp_ecc` commit that introduced `iadd256.kmx` and the
+# generalized `run_proofs.sh` benchmark driver (branch `update_examples`).
+# The vendored example_data circuits are byte-identical at this commit.
+# Supersedes WORKLOAD.md's v0.1 pin for the iadd workload until KB-5 (#117)
+# re-pins WORKLOAD.md itself.
+UPSTREAM_PIN_COMMIT = "fc8dc785dee9aa1045e440ed42ba56942c458124"
+
+# Reference-simulator replay budget for cross-validation, in gate steps
+# (gates-per-repetition x K x cases). At iadd256/K=4 this covers ~2400 cases;
+# at the reference point (K=8000) it still replays one full case. The replayed
+# count is a pure function of the fixture inputs, so fixtures stay
+# byte-reproducible.
+_SIM_BUDGET_GATE_STEPS = 25_000_000
+
+_ACC, _OFFSET = "r0", "r1"
 
 _log = gt_logging.get_logger("grover_tax.iadd_fixture")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -66,12 +98,15 @@ def build_iadd_fixture(
     n_samples: int,
     tier: str,
     circuit_source: str = "iadd64.kmx",
+    pin_commit: str = UPSTREAM_PIN_COMMIT,
 ) -> dict[str, object]:
-    """Assemble a `v0.3-iadd` fixture dict for `repetitions` copies of the adder.
+    """Assemble a `v0.3-iadd` fixture dict: one stored adder copy, K-loop semantics.
 
     Raises:
         FixtureError(FIXTURE.SCHEMA_INVALID): if the assembled fixture fails its
             own JSON Schema (a generator defect).
+        FixtureError(FIXTURE.CROSS_VALIDATION_FAIL): if the reference simulator
+            disagrees with the integer-math expectation on a replayed case.
         FixtureError: propagated from the transpiler if the source circuit is
             outside the classical subset.
     """
@@ -80,29 +115,25 @@ def build_iadd_fixture(
     if n_samples < 1:
         raise ValueError(f"n_samples must be >= 1, got {n_samples}")
 
-    workload = load_workload_md(workload_md_path())
-
     base = transpile_file(_example_data_dir() / circuit_source)
     register_width = _adder_register_width(base, circuit_source)
+    num_bytes = min_state_bytes(base)
+    layout = base.register_layout
 
-    # The K-repeated circuit: same qubits, gates concatenated K times.
-    repeated = KmxCircuit(
-        gates=base.gates * repetitions,
-        registers=base.registers,
-        num_qubits=base.num_qubits,
-        source_bytes=base.source_bytes,
-    )
-
-    seed_bytes = hashlib.sha256(SEED).digest()
+    seed_bytes = hashlib.sha256(
+        SEED
+        + bytes.fromhex(kmx_source_sha256(base.source_bytes))
+        + repetitions.to_bytes(8, "little")
+        + n_samples.to_bytes(8, "little")
+    ).digest()
     cases = iadd_test_cases(width=register_width, count=n_samples, seed=seed_bytes)
-    num_bytes = min_state_bytes(repeated)
-    layout = repeated.register_layout
 
+    modulus = 1 << register_width
     test_cases: list[dict[str, object]] = []
     for case in cases:
-        x_state = encode_registers({"r0": case.x, "r1": case.y}, layout, num_bytes)
-        acc_out, off_out = run_adder_case(repeated, case.x, case.y, num_bytes=num_bytes)
-        y_state = encode_registers({"r0": acc_out, "r1": off_out}, layout, num_bytes)
+        acc_out = (case.x + repetitions * case.y) % modulus
+        x_state = encode_registers({_ACC: case.x, _OFFSET: case.y}, layout, num_bytes)
+        y_state = encode_registers({_ACC: acc_out, _OFFSET: case.y}, layout, num_bytes)
         test_cases.append(
             {
                 "r0_in": case.x,
@@ -112,15 +143,19 @@ def build_iadd_fixture(
             }
         )
 
-    circuit_bytes = serialise(repeated.gates)
-    hist = opcode_histogram(repeated.gates)
-    non_clifford = hist[Opcode.TOFFOLI.name]  # CCX is the only non-Clifford here
-    instruction_count = len(repeated.gates)
+    _sim_cross_validate(base, test_cases, repetitions=repetitions)
+
+    circuit_bytes = serialise(base.gates)
+    hist = opcode_histogram(base.gates)
+    # CCX is the only non-Clifford here; upstream scales its demanded bounds by
+    # the repetition count (`run_proofs.sh`: SCALED_TOFFOLI = TOFFOLI * nrep).
+    non_clifford = hist[Opcode.TOFFOLI.name] * repetitions
+    instruction_count = len(base.gates) * repetitions
 
     fixture: dict[str, object] = {
         "version": FIXTURE_VERSION,
         "generator_commit": _git_head_sha(),
-        "workload_pin_commit": workload.upstream_commit,
+        "workload_pin_commit": pin_commit,
         "seed_hex": seed_bytes.hex(),
         "tier": tier,
         "circuit_source": circuit_source,
@@ -128,14 +163,14 @@ def build_iadd_fixture(
         "repetitions": repetitions,
         "register_layout": layout,
         "register_width": register_width,
-        "num_qubits": repeated.num_qubits,
+        "num_qubits": base.num_qubits,
         "n_samples": n_samples,
         "bit_stripe_width": _BIT_STRIPE_WIDTH,
         "circuit_serialisation_format_version": CIRCUIT_SERIALISATION_FORMAT_VERSION,
         "circuit_byte_serialisation_hex": circuit_bytes.hex(),
         "circuit_commitment_sha256_hex": hashlib.sha256(circuit_bytes).hexdigest(),
         "circuit_commitment_blake2s_hex": hashlib.blake2s(circuit_bytes).hexdigest(),
-        "demanded_max_qubit_count": repeated.num_qubits,
+        "demanded_max_qubit_count": base.num_qubits,
         "demanded_max_non_clifford_count": non_clifford,
         "demanded_max_circuit_instructions": instruction_count,
         "demanded_num_samples": n_samples,
@@ -169,13 +204,54 @@ def _adder_register_width(circuit: KmxCircuit, circuit_source: str) -> int:
     return width
 
 
+def _sim_cross_validate(
+    base: KmxCircuit,
+    test_cases: list[dict[str, object]],
+    *,
+    repetitions: int,
+) -> None:
+    """Replay full K-repetition cases under the reference simulator (F-INV-4).
+
+    Validates the first `n` cases where `n` is the largest count fitting the
+    fixed gate-step budget — at least one case is always replayed, whatever
+    the cost.
+    """
+    gates = list(base.gates)
+    steps_per_case = len(gates) * repetitions
+    n_validate = min(len(test_cases), max(1, _SIM_BUDGET_GATE_STEPS // steps_per_case))
+    for i in range(n_validate):
+        state = bytes.fromhex(str(test_cases[i]["x_hex"]))
+        for _ in range(repetitions):
+            state = run(gates, state)
+        if state != bytes.fromhex(str(test_cases[i]["y_hex"])):
+            raise FixtureError(
+                FixtureSubcode.CROSS_VALIDATION_FAIL,
+                f"test case {i}: simulated K={repetitions} output {state.hex()} "
+                f"!= integer-math expectation {test_cases[i]['y_hex']}",
+            )
+    _log.info(
+        "sim cross-validated %d/%d cases (%d gate steps each)",
+        n_validate,
+        len(test_cases),
+        steps_per_case,
+    )
+
+
 # -- CLI + I/O ---------------------------------------------------------------
+
+
+def _default_out_path(circuit_source: str, repetitions: int, n_samples: int) -> Path:
+    stem = Path(circuit_source).stem
+    return fixtures_dir() / f"v0.3-{stem}-k{repetitions}-n{n_samples}.json"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="gen-iadd-fixtures", description=__doc__)
     parser.add_argument(
-        "--repetitions", type=int, default=1, help="K — copies of the adder (default: 1)"
+        "--repetitions",
+        type=int,
+        default=1,
+        help="K — adder repetitions; expected output is r0 + K*r1 mod 2^width (default: 1)",
     )
     parser.add_argument(
         "--samples", type=int, default=16, help="number of supplied test cases (default: 16)"
@@ -185,10 +261,15 @@ def main(argv: list[str] | None = None) -> int:
         "--circuit", default="iadd64.kmx", help="source .kmx circuit (default: iadd64.kmx)"
     )
     parser.add_argument(
+        "--pin-commit",
+        default=UPSTREAM_PIN_COMMIT,
+        help="upstream zkp_ecc commit recorded as workload_pin_commit",
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         default=None,
-        help="output path (default: fixtures/v0.3-iadd-<tier>.json)",
+        help="output path (default: fixtures/v0.3-<circuit>-k<K>-n<N>.json)",
     )
     parser.add_argument(
         "--check",
@@ -198,7 +279,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     out_path = (
-        args.out if args.out is not None else fixtures_dir() / f"{FIXTURE_VERSION}-{args.tier}.json"
+        args.out
+        if args.out is not None
+        else _default_out_path(args.circuit, args.repetitions, args.samples)
     )
 
     try:
@@ -207,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
             n_samples=args.samples,
             tier=args.tier,
             circuit_source=args.circuit,
+            pin_commit=args.pin_commit,
         )
     except FixtureError as e:
         print(str(e), file=sys.stderr)
@@ -245,9 +329,7 @@ def _check_against_disk(fixture: dict[str, object], path: Path) -> int:
         return FIXTURE_EXIT_CODE
     on_disk = json.loads(path.read_text(encoding="utf-8"))
     if _normalise(fixture) != _normalise(on_disk):
-        print(
-            f"{FixtureSubcode.DRIFT.value}: {path} differs from regenerated bytes", file=sys.stderr
-        )
+        print(f"{FixtureSubcode.DRIFT.value}: {path} differs from regenerated bytes", file=sys.stderr)
         return FIXTURE_EXIT_CODE
     return 0
 

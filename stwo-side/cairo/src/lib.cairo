@@ -21,6 +21,7 @@ pub mod commit;
 pub mod c_tests;
 pub mod io;
 pub mod kickmix;
+pub mod wide;
 
 use core::array::ArrayTrait;
 use grover_tax_circuit::commit::commit_blake2s;
@@ -255,6 +256,110 @@ pub fn apples_to_apples_executable(input: Array<felt252>) -> felt252 {
             grover_tax_circuit::gates::range_check_gate(gate);
             s = grover_tax_circuit::gates::step(s, gate);
             gi = gi + 1_u32;
+        };
+        assert!(s == y_state, "test case simulation mismatch");
+        tc = tc + 1_u32;
+    };
+
+    1  // success
+}
+
+/// Cairo-vm-executable entry point for the v0.3-iadd repeated-addition
+/// workload (KB-15, #127).
+///
+/// Proves: Blake2s(circuit_bytes) == expected_commitment, and for each test
+/// case (x, y): looping the deserialised gate list `n_reps` times over the
+/// 512-bit state loaded from x yields y. The stored circuit is ONE adder
+/// repetition (`fixture-v0.3-iadd.schema.json`); `n_reps` is the public
+/// scaling knob, mirroring upstream's `num_repetitions` public value.
+///
+/// Input layout (flat `Array<felt252>`):
+///   [0]              n_cb: u32   — number of circuit bytes
+///   [1 .. n_cb]      circuit bytes, one byte per felt252
+///   [n_cb+1]         commitment_lo: u128 — low  128 bits of Blake2s digest
+///   [n_cb+2]         commitment_hi: u128 — high 128 bits
+///   [n_cb+3]         n_reps: u32 — adder repetitions K (>= 1)
+///   [n_cb+4]         n_sb: u32   — state bytes per case (<= 64)
+///   [n_cb+5]         n_tc: u32   — number of test cases
+///   per test case (2 * n_sb felts):
+///     [0 .. n_sb-1]      x_bytes: u8 — full input state
+///     [n_sb .. 2*n_sb-1] y_bytes: u8 — full expected output state
+#[executable]
+pub fn iadd_executable(input: Array<felt252>) -> felt252 {
+    let mut span = input.span();
+
+    // 1. Read circuit bytes.
+    let n_cb: u32 = (*span.pop_front().unwrap()).try_into().unwrap();
+    let mut circuit_bytes: Array<u8> = ArrayTrait::new();
+    let mut ci: u32 = 0_u32;
+    loop {
+        if ci == n_cb { break; }
+        let b: u8 = (*span.pop_front().unwrap()).try_into().unwrap();
+        circuit_bytes.append(b);
+        ci = ci + 1_u32;
+    };
+
+    // 2. Verify commitment: Blake2s(circuit_bytes) == expected.
+    let expected_lo: u128 = (*span.pop_front().unwrap()).try_into().unwrap();
+    let expected_hi: u128 = (*span.pop_front().unwrap()).try_into().unwrap();
+    let digest = commit_blake2s(@circuit_bytes);
+    let computed = digest_to_u256_be(digest);
+    let expected_commitment = u256 { low: expected_lo, high: expected_hi };
+    assert!(computed == expected_commitment, "blake2s commitment mismatch");
+
+    // 3. Deserialise the single stored repetition.
+    let gates = grover_tax_circuit::serialise::deserialise(@circuit_bytes);
+
+    // 4. Read repetition count, state width, and case count.
+    let n_reps: u32 = (*span.pop_front().unwrap()).try_into().unwrap();
+    assert!(n_reps >= 1_u32, "n_reps must be >= 1");
+    let n_sb: u32 = (*span.pop_front().unwrap()).try_into().unwrap();
+    assert!(n_sb <= grover_tax_circuit::wide::MAX_STATE_BYTES, "state width over 64 bytes");
+    let n_tc: u32 = (*span.pop_front().unwrap()).try_into().unwrap();
+
+    // 5. Range-check each gate once against the 512-wire bound; the checks
+    //    don't depend on the state, so hoisting them out of the repetition
+    //    loop keeps the K-scaled trace purely gate execution.
+    let mut gi: u32 = 0_u32;
+    loop {
+        if gi == gates.len() { break; }
+        grover_tax_circuit::wide::range_check_gate512(*gates.at(gi));
+        gi = gi + 1_u32;
+    };
+
+    // 6. Run each test case: K repetitions of the gate list.
+    let mut tc: u32 = 0_u32;
+    loop {
+        if tc == n_tc { break; }
+        let mut x_bytes: Array<u8> = ArrayTrait::new();
+        let mut bi: u32 = 0_u32;
+        loop {
+            if bi == n_sb { break; }
+            let b: u8 = (*span.pop_front().unwrap()).try_into().unwrap();
+            x_bytes.append(b);
+            bi = bi + 1_u32;
+        };
+        let mut y_bytes: Array<u8> = ArrayTrait::new();
+        let mut bi: u32 = 0_u32;
+        loop {
+            if bi == n_sb { break; }
+            let b: u8 = (*span.pop_front().unwrap()).try_into().unwrap();
+            y_bytes.append(b);
+            bi = bi + 1_u32;
+        };
+        let x_state = grover_tax_circuit::wide::bytes_to_state512(@x_bytes);
+        let y_state = grover_tax_circuit::wide::bytes_to_state512(@y_bytes);
+        let mut s = x_state;
+        let mut rep: u32 = 0_u32;
+        loop {
+            if rep == n_reps { break; }
+            let mut gi2: u32 = 0_u32;
+            loop {
+                if gi2 == gates.len() { break; }
+                s = grover_tax_circuit::wide::step512(s, *gates.at(gi2));
+                gi2 = gi2 + 1_u32;
+            };
+            rep = rep + 1_u32;
         };
         assert!(s == y_state, "test case simulation mismatch");
         tc = tc + 1_u32;
