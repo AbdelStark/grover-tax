@@ -20,6 +20,7 @@ pub mod serialise;
 pub mod commit;
 pub mod c_tests;
 pub mod io;
+pub mod kickmix;
 
 use core::array::ArrayTrait;
 use grover_tax_circuit::commit::commit_blake2s;
