@@ -191,6 +191,29 @@ benchmark"**; epic is **#112**.
 | coordinate with Tanuj's Cairo program for statement-equality | 2 | #125 (KB-13) |
 | methodology note / cross-check vs his SP1 numbers; share write-up | 2 | #126 (KB-14) |
 
+### Tier-1 implementation status
+
+The Tier-1 fixture path is wired and cross-validated in-repo (the prover-side
+end-to-end timing still needs the reference rig, KB-6/#118):
+
+- **G3 (classical `.kmx`)** — landed: `grover_tax.kmx` transpiles
+  `iadd64`/`iadd8` (502 CNOT + 125 TOFFOLI golden), rejects the Tier-2 subset
+  (KB-1/#113).
+- **G5 (register I/O)** — landed: `grover_tax.registers` encodes/decodes the
+  two-register 2's-complement LE state; `iadd64 101 123 → 224 123` (KB-3/#115).
+- **repeated-addition fixture + schema** — landed: `gen-iadd-fixtures` emits
+  `fixtures/v0.3-iadd-T<tier>.json`; the `(x + K·y mod 2ⁿ, y)` law holds for
+  K∈{1,2,3} (KB-4/#116).
+- **G1 (adder = canonical workload)** — **adopted** (KB-2/#114): the
+  `v0.3-iadd` fixture is the canonical grover-tax workload, and
+  `sim_reference` now cross-validates it (`run(C, x_state) == y_state`, the
+  F-INV-4 oracle). The v0.2 random-circuit path is **retained** for regression
+  / T0 continuity.
+
+The four divergences (§4) that remain open are all Tier-2: in-proof
+Fiat–Shamir (G2/KB-9), resource certification (G2/KB-10), the full kickmix
+simulator (G3/KB-8/KB-11), and running upstream's SP1 program (G4/KB-12).
+
 ## 7. Open coordination questions for Tanuj
 
 1. Confirm the **exact circuit(s)**: `iadd64` only, or the qubit-efficient

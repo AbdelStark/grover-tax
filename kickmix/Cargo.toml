@@ -1,0 +1,27 @@
+# Standalone crate: the full kickmix simulator (KB-8, #120).
+#
+# Deliberately its own workspace root (empty `[workspace]` table) so it builds
+# and tests in isolation with no external dependencies — `cargo test` here is
+# offline and fast, and does not pull the heavy Stwo/SP1 prover stacks. The SP1
+# side (KB-12, #124) and the Fiat-Shamir / resource-cert layers (KB-9/#121,
+# KB-10/#122) depend on this library.
+[package]
+name = "kickmix"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.79"
+license = "MIT"
+description = "Full kickmix (.kmx) circuit simulator: qubits + phase + classical bits + condition stack + HMR phase-kickback (Khattar/Google benchmark, KB-8)."
+
+[workspace]
+
+[lib]
+name = "kickmix"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kmx"
+path = "src/bin/kmx.rs"
+
+[lints.rust]
+unsafe_code = "forbid"

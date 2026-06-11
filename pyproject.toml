@@ -28,11 +28,14 @@ dependencies = [
 
 [project.scripts]
 gen-fixtures = "grover_tax.gen_fixtures:main"
+gen-iadd-fixtures = "grover_tax.iadd_fixture:main"
+kmx-transpile = "grover_tax.kmx:main"
 analyze = "grover_tax.analyze:main"
 plot = "grover_tax.plot:main"
 sim-check = "grover_tax.sim_reference:main"
 check-results-md = "grover_tax.check_results_md:main"
 validate-schemas = "grover_tax.validate_schemas:main"
+apples-verify = "grover_tax.resource_cert:main"
 
 [project.urls]
 Homepage = "https://github.com/AbdelStark/grover-tax"
