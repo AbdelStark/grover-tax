@@ -5,14 +5,19 @@ edition = "2024_07"
 description = "Cairo gate-execution circuit for grover-tax v0.1 (Stwo side)."
 license = "MIT"
 
-# `scarb execute` runs the `#[executable]` function and produces a
+# `scarb execute` runs the `#[executable]` functions and produces a
 # Cairo PIE / standard-output file that `stwo-cairo`'s prover can
-# consume. See `docs/apples-to-apples-v0.1.md`.
-[executable]
-
+# consume. See `docs/apples-to-apples-v0.1.md`. One explicit target per
+# executable function (scarb requires this once there is more than one).
 [[target.executable]]
 name = "grover_tax_executable"
 function = "grover_tax_circuit::apples_to_apples_executable"
+
+# v0.3-iadd repeated-addition workload (KB-15, #127): 512-bit state,
+# single stored adder repetition looped K times in-proof.
+[[target.executable]]
+name = "grover_tax_iadd_executable"
+function = "grover_tax_circuit::iadd_executable"
 
 [cairo]
 enable-gas = false
