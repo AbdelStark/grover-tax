@@ -17,7 +17,7 @@ from grover_tax.iadd_fixture import build_iadd_fixture
 from grover_tax.sim_reference import _verify_fixture, main
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_COMMITTED = _REPO_ROOT / "fixtures" / "v0.3-iadd-T0.json"
+_COMMITTED = _REPO_ROOT / "fixtures" / "v0.3-iadd256-k2-n4.json"
 
 
 def _write(fixture: dict, path: Path) -> None:
@@ -25,7 +25,7 @@ def _write(fixture: dict, path: Path) -> None:
 
 
 def test_committed_iadd_fixture_cross_validates() -> None:
-    """The canonical fixtures/v0.3-iadd-T0.json passes the reference oracle."""
+    """The canonical fixtures/v0.3-iadd256-k2-n4.json passes the reference oracle."""
     _verify_fixture(_COMMITTED)  # raises on any mismatch
 
 
