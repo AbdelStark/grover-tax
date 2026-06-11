@@ -51,9 +51,15 @@ CIRCUIT_SERIALISATION_FORMAT_VERSION = 1
 # `version` in the emitted fixture (F-INV-7).
 FIXTURE_VERSION = "v0.2"
 
-# Number of decimal places at which JSON dumps round-trip identically.
-# `json.dumps` uses Python's repr for floats; we never emit floats so this
-# is informational only.
+# Frozen v0.2 legacy parameters. The v0.2 random-circuit workload is **retained
+# as a regression / T0-continuity artifact** (KB-2, #114); its parameters no
+# longer track `WORKLOAD.md`, which now pins the *iadd* workload (KB-5, #117).
+# These constants reproduce the committed `fixtures/v0.2.json` byte-for-byte.
+# (Before KB-5 they were read from the `WORKLOAD.md` table rows; the
+# Khattar/Google fixtures are produced by `grover_tax.iadd_fixture` instead.)
+V02_N_SAMPLES = 4
+V02_BIT_STRIPE_WIDTH = 64
+V02_GATE_COUNT = 1024
 
 _log = gt_logging.get_logger("grover_tax.gen_fixtures")
 
@@ -109,10 +115,15 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _build_fixture(workload: Workload) -> dict[str, object]:
-    """Run the full RFC-0002 §"Algorithm" pipeline and return the dict."""
-    n_samples = _parse_workload_int(workload, "`N` (number of test cases)")
-    bit_stripe_width = _parse_workload_int(workload, "`W` (bit-stripe width)")
-    gate_count = _parse_workload_int(workload, "Gate count of `C` for one secp256k1 point-add")
+    """Run the full RFC-0002 §"Algorithm" pipeline and return the dict.
+
+    Circuit parameters are the frozen v0.2 legacy constants (the workload is
+    retained for regression, KB-2); only `workload.upstream_commit` is read
+    from the now-iadd-pinned `WORKLOAD.md` (KB-5).
+    """
+    n_samples = V02_N_SAMPLES
+    bit_stripe_width = V02_BIT_STRIPE_WIDTH
+    gate_count = V02_GATE_COUNT
 
     seed_bytes = hashlib.sha256(SEED).digest()
     xof = XOF(seed_bytes)
@@ -178,23 +189,6 @@ def _build_circuit(*, gate_count: int, xof: XOF) -> list[Gate]:
             b = xof.read(1)[0]
             gates.append(Gate(Opcode.TOFFOLI, t, a, b))
     return gates  # gate_count is already a power of two
-
-
-def _parse_workload_int(workload: Workload, field_name: str) -> int:
-    """Pull an integer out of the WORKLOAD.md table by left-column name."""
-    row = workload.by_name.get(field_name)
-    if row is None:
-        raise FixtureError(
-            FixtureSubcode.WORKLOAD_NOT_PINNED,
-            f"WORKLOAD.md is missing field {field_name!r}",
-        )
-    try:
-        return int(row.value)
-    except ValueError as e:
-        raise FixtureError(
-            FixtureSubcode.WORKLOAD_NOT_PINNED,
-            f"WORKLOAD.md field {field_name!r} value {row.value!r} is not an integer",
-        ) from e
 
 
 # -- I/O helpers -------------------------------------------------------------
