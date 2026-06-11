@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+#
+# bin/apples-verify — resource-certification verifier (KB-10, #122).
+#
+# Certifies that a kickmix circuit's resource usage (qubits, non-Clifford
+# gates, instructions, samples) satisfies the demanded bounds — the check the
+# reference `example_zkp_verify` performs alongside the proof. Applies to both
+# prover stacks: the counts are a property of the circuit, not the backend.
+#
+# Thin wrapper over `grover_tax.resource_cert`; see that module for the exact
+# >=/<= comparisons (mirrored bit-for-bit in `kickmix::resource` (Rust) and
+# `stwo-side/cairo/src/kickmix.cairo` (Cairo)).
+#
+# Usage:
+#   bin/apples-verify --kmx <file.kmx> --num-samples N --fixture <v0.3-iadd.json>
+#   bin/apples-verify --kmx <file.kmx> --num-samples N \
+#       --demand-samples N --demand-qubits Q \
+#       --demand-non-clifford T --demand-instructions I
+#
+# Exit codes:
+#   0  certified (within all demanded bounds)
+#   1  PROVER.VERIFIER_REJECTED (a bound was exceeded)
+#   2  usage error
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
+
+cd "${REPO_ROOT}"
+exec uv run python -m grover_tax.resource_cert "$@"

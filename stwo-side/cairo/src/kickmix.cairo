@@ -256,11 +256,60 @@ pub fn read_register(ref s: State, members: @Array<u32>) -> u256 {
     acc
 }
 
+// --------------------------------------------------------------------------
+// Resource certification (KB-10, #122) — mirrors kickmix::resource (Rust).
+// --------------------------------------------------------------------------
+
+/// The sentinel the prover commits alongside the resource counts (upstream `42`).
+pub const SENTINEL: u64 = 42;
+
+/// Resource usage committed by the prover.
+#[derive(Copy, Drop)]
+pub struct ResourceCounts {
+    pub num_samples: u64,
+    pub max_qubit_count: u64,
+    pub max_non_clifford_count: u64,
+    pub max_circuit_instructions: u64,
+}
+
+/// Bounds the verifier demands (from the fixture, KB-4).
+#[derive(Copy, Drop)]
+pub struct DemandedBounds {
+    pub num_samples: u64,
+    pub max_qubit_count: u64,
+    pub max_non_clifford_count: u64,
+    pub max_circuit_instructions: u64,
+}
+
+/// Certify committed `counts` (with `sentinel`) against `demanded`. Returns `0`
+/// when accepted, else the first violation code (1 = too few samples, 2 = qubit
+/// cap, 3 = non-Clifford cap, 4 = instruction cap, 5 = bad sentinel) — the same
+/// >=/<= comparisons as the Rust `kickmix::resource::certify`.
+pub fn certify(counts: ResourceCounts, sentinel: u64, demanded: DemandedBounds) -> u32 {
+    if counts.num_samples < demanded.num_samples {
+        return 1;
+    }
+    if counts.max_qubit_count > demanded.max_qubit_count {
+        return 2;
+    }
+    if counts.max_non_clifford_count > demanded.max_non_clifford_count {
+        return 3;
+    }
+    if counts.max_circuit_instructions > demanded.max_circuit_instructions {
+        return 4;
+    }
+    if sentinel != SENTINEL {
+        return 5;
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Inst, NO_COND, NO_TARGET, OP_CCX, OP_CX, OP_HMR, OP_NEG, OP_R, OP_X, get_q, load_register,
-        new_state, next_u64, read_register, rng_new, run,
+        DemandedBounds, Inst, NO_COND, NO_TARGET, OP_CCX, OP_CX, OP_HMR, OP_NEG, OP_R, OP_X,
+        ResourceCounts, SENTINEL, certify, get_q, load_register, new_state, next_u64,
+        read_register, rng_new, run,
     };
 
     fn inst(opcode: u32, t0: u32, t1: u32, t2: u32, cond: u32) -> Inst {
@@ -356,5 +405,74 @@ mod tests {
         let mut rng = rng_new(0); // first bit = 1
         run(ref s, ref rng, @p);
         assert!(s.phase == 1, "uncorrected kickback inverts phase");
+    }
+
+    // -- resource certification (mirrors kickmix::resource) -----------------
+
+    fn iadd64_counts(num_samples: u64) -> ResourceCounts {
+        // The iadd64 kickmix counts (incl. metadata): 757 instructions, 128
+        // qubits, 125 non-Clifford CCX — matching the Rust side and upstream.
+        ResourceCounts {
+            num_samples,
+            max_qubit_count: 128,
+            max_non_clifford_count: 125,
+            max_circuit_instructions: 757,
+        }
+    }
+
+    fn iadd64_demanded() -> DemandedBounds {
+        DemandedBounds {
+            num_samples: 128,
+            max_qubit_count: 128,
+            max_non_clifford_count: 125,
+            max_circuit_instructions: 757,
+        }
+    }
+
+    #[test]
+    fn certify_conforming_passes() {
+        assert!(certify(iadd64_counts(128), SENTINEL, iadd64_demanded()) == 0, "conforming");
+    }
+
+    #[test]
+    fn certify_more_samples_passes() {
+        assert!(certify(iadd64_counts(1000), SENTINEL, iadd64_demanded()) == 0, "more samples ok");
+    }
+
+    #[test]
+    fn certify_too_few_samples_rejected() {
+        assert!(certify(iadd64_counts(64), SENTINEL, iadd64_demanded()) == 1, "too few samples");
+    }
+
+    #[test]
+    fn certify_qubit_cap_exceeded_rejected() {
+        let d = DemandedBounds {
+            num_samples: 128, max_qubit_count: 64, max_non_clifford_count: 125,
+            max_circuit_instructions: 757,
+        };
+        assert!(certify(iadd64_counts(128), SENTINEL, d) == 2, "qubit cap");
+    }
+
+    #[test]
+    fn certify_non_clifford_cap_exceeded_rejected() {
+        let d = DemandedBounds {
+            num_samples: 128, max_qubit_count: 128, max_non_clifford_count: 100,
+            max_circuit_instructions: 757,
+        };
+        assert!(certify(iadd64_counts(128), SENTINEL, d) == 3, "non-clifford cap");
+    }
+
+    #[test]
+    fn certify_instruction_cap_exceeded_rejected() {
+        let d = DemandedBounds {
+            num_samples: 128, max_qubit_count: 128, max_non_clifford_count: 125,
+            max_circuit_instructions: 700,
+        };
+        assert!(certify(iadd64_counts(128), SENTINEL, d) == 4, "instruction cap");
+    }
+
+    #[test]
+    fn certify_bad_sentinel_rejected() {
+        assert!(certify(iadd64_counts(128), 41, iadd64_demanded()) == 5, "bad sentinel");
     }
 }
