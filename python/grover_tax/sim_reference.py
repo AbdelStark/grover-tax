@@ -191,7 +191,8 @@ def _verify_iadd_fixture(fixture: dict[str, object]) -> None:
     scales the workload, so the gate list is applied K times per case (KB-15).
     """
     circuit = deserialise(bytes.fromhex(str(fixture["circuit_byte_serialisation_hex"])))
-    repetitions = int(fixture.get("repetitions", 1))
+    reps_raw = fixture.get("repetitions", 1)
+    repetitions = reps_raw if isinstance(reps_raw, int) else int(str(reps_raw))
     cases = fixture["test_cases"]
     assert isinstance(cases, list)
     for i, case in enumerate(cases):
