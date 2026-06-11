@@ -36,6 +36,8 @@ Exit code `0` is reserved for success. Exit codes outside `{0,1,2,3,4,5,6}` are 
 | `FIXTURE.SCHEMA_INVALID` | the emitted file fails its own JSON Schema | abort; defect in `gen_fixtures.py` |
 | `FIXTURE.WORKLOAD_NOT_PINNED` | `WORKLOAD.md` contains `TBD` | abort; complete `WORKLOAD.md` per `RFC-0001` |
 | `FIXTURE.SEED_DRIFT` | regenerating with the same seed produces different bytes | defect; non-determinism in the generator |
+| `FIXTURE.UNSUPPORTED_INSTRUCTION` | the `.kmx → GTV1` transpiler (KB-1) hits a phase/measurement/classical/control-flow instruction or an `if` condition (outside the classical reversible subset) | abort; the circuit needs the full kickmix simulator (KB-8) |
+| `FIXTURE.KMX_PARSE_ERROR` | a `.kmx` source line is malformed: bad instruction name, unparseable target, wrong gate arity, non-qubit operand, or qubit id over the GTV1 u16 wire limit | abort; fix the circuit source |
 
 ### PROVER (exit 1)
 

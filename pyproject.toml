@@ -28,6 +28,7 @@ dependencies = [
 
 [project.scripts]
 gen-fixtures = "grover_tax.gen_fixtures:main"
+kmx-transpile = "grover_tax.kmx:main"
 analyze = "grover_tax.analyze:main"
 plot = "grover_tax.plot:main"
 sim-check = "grover_tax.sim_reference:main"
