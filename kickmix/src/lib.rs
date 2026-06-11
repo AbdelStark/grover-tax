@@ -32,6 +32,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod fiat_shamir;
+
 use std::collections::BTreeMap;
 use std::fmt;
 
