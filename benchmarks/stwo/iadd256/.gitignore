@@ -1,0 +1,8 @@
+build/
+native-air/Cargo.lock
+results/*.jsonl
+results/*.log
+results/*.summary.md
+external/*
+!external/.gitkeep
+scripts/__pycache__/
