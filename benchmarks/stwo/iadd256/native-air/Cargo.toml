@@ -1,0 +1,25 @@
+[package]
+name = "native-iadd-air"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+itertools = "0.12"
+hex = "0.4"
+num-bigint = { version = "0.4", features = ["serde"] }
+num-traits = "0.2"
+ruint = "=1.17.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["arbitrary_precision"] }
+sha2 = "0.10"
+sha3 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha3", tag = "patch-sha3-0.10.8-sp1-6.0.0" }
+stwo = { path = "../../../../../stwo/crates/stwo", features = ["prover"] }
+stwo-constraint-framework = { path = "../../../../../stwo/crates/constraint-framework", features = [
+    "prover",
+    "parallel",
+] }
+zkp_ecc-lib = { path = "../external/zkp_ecc/lib" }
